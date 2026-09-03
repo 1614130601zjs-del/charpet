@@ -1,8 +1,16 @@
-import type { PetAction, PetEmotion, PetState } from './petTypes';
+import type { PetAction, PetMood } from './petTypes';
+
+export type PetState = {
+  emotion: PetMood;
+  action: PetAction;
+  intensity: number;
+  speech: string;
+  updatedAt: number;
+};
 
 export type PetRuntimeEvent = {
   action: PetAction;
-  emotion?: PetEmotion;
+  emotion?: PetMood;
   intensity?: number;
   text?: string;
 };
