@@ -6,10 +6,9 @@ import { applyPetEvent, nextIdleState, type PetState } from './pet/petRuntime';
 import { createPetEvent, dispatchPetEvent, subscribePetEvents } from './bridge/semanticEvents';
 import { getPetMotion, motionScale } from './pet/petRenderer';
 import { NativeCreator, type CreatorState } from './creator/NativeCreator';
+import { loadPetRecords, savePetRecords } from './storage/petStore';
 
 type Pet = { id: string; name: string; image: string; source: 'upload' | 'creator'; createdAt: number; creatorState?: CreatorState };
-const KEY = 'charpet.pets.v1';
-function loadPets(): Pet[] { try { return JSON.parse(localStorage.getItem(KEY) || '[]'); } catch { return []; } }
 
 const moodLines: Record<PetMood, string[]> = {
   idle: ['嗯……', '陪着你呢', '今天也要加油呀'],
@@ -22,7 +21,7 @@ const moodLines: Record<PetMood, string[]> = {
 };
 
 function App() {
-  const [pets, setPets] = useState<Pet[]>(loadPets);
+  const [pets, setPets] = useState<Pet[]>(loadPetRecords as () => Pet[]);
   const [selected, setSelected] = useState<Pet | null>(null);
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [creatorName, setCreatorName] = useState('我的 Char');
@@ -34,7 +33,7 @@ function App() {
   const idleTimer = useRef<number | null>(null);
   const sleepTimer = useRef<number | null>(null);
 
-  useEffect(() => localStorage.setItem(KEY, JSON.stringify(pets)), [pets]);
+  useEffect(() => savePetRecords(pets), [pets]);
   const selectedPet = selected ? pets.find(p => p.id === selected.id) || selected : null;
   const motion = getPetMotion(petState);
 
