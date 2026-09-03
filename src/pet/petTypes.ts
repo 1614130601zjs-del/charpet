@@ -1,4 +1,4 @@
-export type PetMood = 'idle' | 'happy' | 'surprised' | 'sad' | 'angry' | 'shy';
+export type PetMood = 'idle' | 'happy' | 'surprised' | 'sad' | 'angry' | 'shy' | 'sleep';
 
 export type PetAction =
   | 'idle'
