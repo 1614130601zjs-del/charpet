@@ -17,6 +17,12 @@ export type SemanticPetEvent = {
   timestamp?: number;
 };
 
+export type PetStats = {
+  interactions: number;
+  affection: number;
+  lastSeenAt: number;
+};
+
 export type PetRecord = {
   id: string;
   name: string;
@@ -24,4 +30,5 @@ export type PetRecord = {
   source: 'upload' | 'creator';
   createdAt: number;
   creatorState?: unknown;
+  stats?: PetStats;
 };
