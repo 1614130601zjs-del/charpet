@@ -1,43 +1,18 @@
 <!doctype html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-    <meta name="theme-color" content="#f7f4ef" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="stylesheet" href="/charpet-v2.css" />
-    <title>CharPet Studio</title>
-  </head>
-  <body>
-    <div id="root">
-      <div id="boot-fallback" style="padding:24px;font-family:system-ui,sans-serif;color:#555">CharPet 正在启动…</div>
-    </div>
-    <a href="/char-appearance-lab.html" style="position:fixed;right:14px;bottom:14px;z-index:9999;padding:10px 14px;border:1px solid #dfd7cf;border-radius:999px;background:#fffaf5;color:#4d4039;text-decoration:none;font:700 12px system-ui,-apple-system,sans-serif;box-shadow:0 8px 24px rgba(60,45,35,.12)">🐾 身体工作室</a>
-    <script>
-      window.addEventListener('error', (event) => {
-        const root = document.getElementById('root');
-        if (root && root.querySelector('#boot-fallback')) {
-          root.innerHTML = '<div style="padding:24px;font-family:system-ui,sans-serif;color:#8b3f3f"><h2>CharPet 启动失败</h2><p>前端脚本没有正常启动。</p><pre style="white-space:pre-wrap;background:#fff5f5;padding:12px;border-radius:10px">' + String(event.error?.stack || event.message || '未知错误').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre></div>';
-        }
-      });
-      window.addEventListener('unhandledrejection', (event) => {
-        const root = document.getElementById('root');
-        if (root && root.querySelector('#boot-fallback')) {
-          root.innerHTML = '<div style="padding:24px;font-family:system-ui,sans-serif;color:#8b3f3f"><h2>CharPet 启动失败</h2><p>前端脚本发生未处理异常。</p><pre style="white-space:pre-wrap;background:#fff5f5;padding:12px;border-radius:10px">' + String(event.reason?.stack || event.reason || '未知错误').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre></div>';
-        }
-      });
-    </script>
-    <script type="module" src="/src/main.tsx"></script>
-    <script src="/charpet-features.js"></script>
-    <script src="/charpet-diary-readonly.js"></script>
-    <script src="/charpet-v2.js"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js?v=8').catch(() => {}));
-      }
-    </script>
-  </body>
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#f6f2ec" />
+<meta name="mobile-web-app-capable" content="yes" />
+<title>CharPet</title>
+<link rel="stylesheet" href="/charpet-v3.css?v=1" />
+</head>
+<body>
+<div id="root"><div style="padding:24px;font-family:system-ui">CharPet 正在启动…</div></div>
+<script src="/charpet-v3.js?v=1"></script>
+<script>
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('/sw.js?v=9').catch(()=>{}));}
+</script>
+</body>
 </html>
