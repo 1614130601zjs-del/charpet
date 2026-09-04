@@ -7,6 +7,8 @@ import android.content.Intent
 import android.graphics.PixelFormat
 import android.os.Build
 import android.os.IBinder
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
@@ -28,6 +30,10 @@ class OverlayService : Service() {
         const val ACTION_EVENT = "com.charpet.app.ACTION_EVENT"
         const val EXTRA_EVENT_JSON = "com.charpet.app.EXTRA_EVENT_JSON"
         const val ACTION_STOP = "com.charpet.app.ACTION_STOP"
+        const val ACTION_RELAY_START = "com.charpet.app.ACTION_RELAY_START"
+        const val ACTION_RELAY_STOP = "com.charpet.app.ACTION_RELAY_STOP"
+        const val EXTRA_RELAY_URL = "com.charpet.app.EXTRA_RELAY_URL"
+        const val EXTRA_RELAY_TOKEN = "com.charpet.app.EXTRA_RELAY_TOKEN"
         private const val CHANNEL_ID = "charpet_overlay"
         private const val NOTIFICATION_ID = 1001
         private const val ORIGIN = "https://charpet.local"
@@ -35,6 +41,8 @@ class OverlayService : Service() {
         private const val PREFS = "charpet_overlay"
         private const val KEY_X = "x"
         private const val KEY_Y = "y"
+        private const val KEY_RELAY_URL = "relay_url"
+        private const val KEY_RELAY_TOKEN = "relay_token"
     }
 
     private lateinit var windowManager: WindowManager
@@ -44,6 +52,8 @@ class OverlayService : Service() {
     private var webPort: WebMessagePort? = null
     private var userDragging = false
     private var autonomous: AutonomousPetRuntime? = null
+    private var relay: RelayClient? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
 
     override fun onCreate() {
@@ -62,9 +72,21 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
-            stopSelf()
-            return START_NOT_STICKY
+        when (intent?.action) {
+            ACTION_STOP -> {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            ACTION_RELAY_STOP -> {
+                stopRelay()
+                return START_STICKY
+            }
+            ACTION_RELAY_START -> {
+                startRelay(
+                    intent.getStringExtra(EXTRA_RELAY_URL) ?: prefs.getString(KEY_RELAY_URL, "http://127.0.0.1:8787")!!,
+                    intent.getStringExtra(EXTRA_RELAY_TOKEN) ?: prefs.getString(KEY_RELAY_TOKEN, "")!!,
+                )
+            }
         }
         if (!Settings.canDrawOverlays(this)) return START_NOT_STICKY
         if (overlay == null) showOverlay()
@@ -109,6 +131,26 @@ class OverlayService : Service() {
         if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
         startAutonomousRuntime(size)
+        val relayUrl = prefs.getString(KEY_RELAY_URL, "") ?: ""
+        if (relayUrl.isNotBlank()) startRelay(relayUrl, prefs.getString(KEY_RELAY_TOKEN, "") ?: "")
+    }
+
+    private fun startRelay(baseUrl: String, token: String) {
+        prefs.edit().putString(KEY_RELAY_URL, baseUrl.trimEnd('/')).putString(KEY_RELAY_TOKEN, token).apply()
+        relay?.destroy()
+        relay = RelayClient(mainHandler).also { client ->
+            client.onEvent = { event -> sendEventToWeb(event.toJson()) }
+            client.onStatus = { status ->
+                // Keep status out of the pet event stream; the foreground service remains usable offline.
+                android.util.Log.d("CharPetRelay", status)
+            }
+            client.start(baseUrl, token.ifBlank { null })
+        }
+    }
+
+    private fun stopRelay() {
+        relay?.destroy()
+        relay = null
     }
 
     private fun startAutonomousRuntime(petSize: Int) {
@@ -134,28 +176,16 @@ class OverlayService : Service() {
         }
     }
 
-    private fun supportsModernBridge(): Boolean =
-        WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+    private fun supportsModernBridge(): Boolean = WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
 
     private fun installModernBridge(view: WebView) {
         WebViewCompat.addWebMessageListener(
-            view,
-            BRIDGE_NAME,
-            setOf(ORIGIN),
+            view, BRIDGE_NAME, setOf(ORIGIN),
             object : WebViewCompat.WebMessageListener {
-                override fun onPostMessage(
-                    view: WebView,
-                    message: WebMessageCompat,
-                    sourceOrigin: android.net.Uri,
-                    isMainFrame: Boolean,
-                    replyProxy: androidx.webkit.JavaScriptReplyProxy
-                ) {
+                override fun onPostMessage(view: WebView, message: WebMessageCompat, sourceOrigin: android.net.Uri, isMainFrame: Boolean, replyProxy: androidx.webkit.JavaScriptReplyProxy) {
                     if (!isMainFrame || sourceOrigin.toString() != ORIGIN) return
                     val payload = message.data ?: return
-                    if (payload == "charpet.ready") {
-                        replyProxy.postMessage("charpet.ready")
-                        return
-                    }
+                    if (payload == "charpet.ready") { replyProxy.postMessage("charpet.ready"); return }
                     val event = CharPetEvent.parse(payload) ?: return
                     sendEventToWeb(event.toJson())
                     replyProxy.postMessage(event.toJson())
@@ -187,9 +217,7 @@ class OverlayService : Service() {
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (dragging) prefs.edit().putInt(KEY_X, lp.x).putInt(KEY_Y, lp.y).apply()
-                    userDragging = false
-                    autonomous?.setPaused(false)
-                    dragging
+                    userDragging = false; autonomous?.setPaused(false); dragging
                 }
                 else -> false
             }
@@ -230,75 +258,29 @@ class OverlayService : Service() {
         return """
         <!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
         <style>
-          html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
-          body{display:grid;place-items:center;font-family:system-ui}
+          html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}body{display:grid;place-items:center;font-family:system-ui}
           #pet{width:168px;height:210px;display:grid;place-items:center;filter:drop-shadow(0 12px 18px #0002);user-select:none;transition:transform .18s}
-          #pet svg,#petImage{width:100%;height:100%;object-fit:contain}
-          #bubble{position:absolute;top:4px;max-width:190px;background:#fffdf9;border:1px solid #ddd7ce;border-radius:999px;padding:5px 10px;font-size:12px;opacity:0;transition:.2s;z-index:2}
-          #bubble.show{opacity:1}
-          #pet.action-talk .pet-mouth{animation:petTalk .28s ease-in-out infinite alternate}
-          #pet.action-talk .pet-eyes{transform:scaleY(.88);transform-origin:center}
-          #pet.emotion-happy .pet-body{animation:petHappy .7s ease-in-out 2}
-          #pet.emotion-angry .pet-body{animation:petAngry .25s ease-in-out 3}
-          #pet.emotion-surprised .pet-body{animation:petPop .55s ease-out}
-          #pet.emotion-shy .pet-body{animation:petShy .8s ease-in-out}
-          #pet.emotion-sleep .pet-eyes{transform:scaleY(.18);transform-origin:center}
-          @keyframes petTalk{from{transform:scaleY(.55)}to{transform:scaleY(1.18)}}
-          @keyframes petHappy{50%{transform:translateY(-7px) scale(1.08) rotate(-3deg)}}
-          @keyframes petAngry{50%{transform:translateX(5px)}}
-          @keyframes petPop{50%{transform:scale(1.12)}}
-          @keyframes petShy{50%{transform:scale(.94) rotate(2deg)}}
-          .legacy{animation:bounce .5s ease-in-out}.legacy.sleep{animation:float 2s ease-in-out infinite;opacity:.72}
-          @keyframes bounce{50%{transform:scale(1.1) rotate(-3deg)}} @keyframes float{50%{transform:translateY(7px) scale(.97)}}
+          #pet svg,#petImage{width:100%;height:100%;object-fit:contain}#bubble{position:absolute;top:4px;max-width:190px;background:#fffdf9;border:1px solid #ddd7ce;border-radius:999px;padding:5px 10px;font-size:12px;opacity:0;transition:.2s;z-index:2}#bubble.show{opacity:1}
+          #pet.action-talk .pet-mouth{animation:petTalk .28s ease-in-out infinite alternate}#pet.action-talk .pet-eyes{transform:scaleY(.88);transform-origin:center}
+          #pet.emotion-happy .pet-body{animation:petHappy .7s ease-in-out 2}#pet.emotion-angry .pet-body{animation:petAngry .25s ease-in-out 3}#pet.emotion-surprised .pet-body{animation:petPop .55s ease-out}#pet.emotion-shy .pet-body{animation:petShy .8s ease-in-out}#pet.emotion-sleep .pet-eyes{transform:scaleY(.18);transform-origin:center}
+          @keyframes petTalk{from{transform:scaleY(.55)}to{transform:scaleY(1.18)}}@keyframes petHappy{50%{transform:translateY(-7px) scale(1.08) rotate(-3deg)}}@keyframes petAngry{50%{transform:translateX(5px)}}@keyframes petPop{50%{transform:scale(1.12)}}@keyframes petShy{50%{transform:scale(.94) rotate(2deg)}}
+          .legacy{animation:bounce .5s ease-in-out}.legacy.sleep{animation:float 2s ease-in-out infinite;opacity:.72}@keyframes bounce{50%{transform:scale(1.1) rotate(-3deg)}}@keyframes float{50%{transform:translateY(7px) scale(.97)}}
         </style></head><body><div id='bubble'></div><div id='pet'>$visual</div>
         <script>
           const pet=document.getElementById('pet'),bubble=document.getElementById('bubble');
-          function render(e){
-            e=e||{};
-            pet.className='';
-            if(e.action) pet.classList.add('action-'+e.action);
-            if(e.emotion) pet.classList.add('emotion-'+e.emotion);
-            const svg=pet.querySelector('svg');
-            const body=svg?.querySelector('.pet-body');
-            const eyes=svg?.querySelector('.pet-eyes');
-            const mouth=svg?.querySelector('.pet-mouth');
-            if(body){ body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:''); }
-            if(eyes){ eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep'); eyes.classList.toggle('pet-talk',e.action==='talk'); }
-            if(mouth){ mouth.classList.toggle('pet-talk',e.action==='talk'); }
-            bubble.textContent=e.text||'';
-            bubble.classList.toggle('show',!!e.text);
-            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
-              pet.classList.add('legacy');
-              setTimeout(()=>pet.classList.remove('legacy'),700);
-            }
-          }
-          window.__charpetReceive=render;
-          if(window.charPetBridge){
-            window.charPetBridge.onmessage=(event)=>{
-              try{ const message=event.data; if(message==='charpet.ready') return; render(JSON.parse(message)); }catch(_){}
-            };
-            window.charPetBridge.postMessage('charpet.ready');
-          }
-          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){} };port.start();port.postMessage('charpet.ready');}});
-          pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));
-          render({action:'idle',emotion:'idle',intensity:.35});
+          function render(e){e=e||{};pet.className='';if(e.action)pet.classList.add('action-'+e.action);if(e.emotion)pet.classList.add('emotion-'+e.emotion);const svg=pet.querySelector('svg');const body=svg?.querySelector('.pet-body');const eyes=svg?.querySelector('.pet-eyes');const mouth=svg?.querySelector('.pet-mouth');if(body)body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:'');if(eyes){eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep');eyes.classList.toggle('pet-talk',e.action==='talk')}if(mouth)mouth.classList.toggle('pet-talk',e.action==='talk');bubble.textContent=e.text||'';bubble.classList.toggle('show',!!e.text);if(e.action==='talk'||e.action==='tap'||e.action==='wake'){pet.classList.add('legacy');setTimeout(()=>pet.classList.remove('legacy'),700)}}
+          window.__charpetReceive=render;if(window.charPetBridge){window.charPetBridge.onmessage=(event)=>{try{const message=event.data;if(message==='charpet.ready')return;render(JSON.parse(message))}catch(_){} };window.charPetBridge.postMessage('charpet.ready')}
+          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data))}catch(_){}};port.start();port.postMessage('charpet.ready')}});pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
         """
     }
 
-    private fun createChannel() {
-        if (Build.VERSION.SDK_INT < 26) return
-        getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "CharPet 桌宠", NotificationManager.IMPORTANCE_LOW)
-        )
-    }
+    private fun createChannel() { if (Build.VERSION.SDK_INT < 26) return; getSystemService(NotificationManager::class.java).createNotificationChannel(NotificationChannel(CHANNEL_ID, "CharPet 桌宠", NotificationManager.IMPORTANCE_LOW)) }
 
     override fun onDestroy() {
-        autonomous?.stop()
-        autonomous = null
-        webPort?.close()
-        overlay?.let { windowManager.removeView(it) }
-        webView?.destroy()
+        autonomous?.stop(); autonomous = null
+        relay?.destroy(); relay = null
+        webPort?.close(); overlay?.let { windowManager.removeView(it) }; webView?.destroy()
         overlay = null; webView = null; webPort = null
         super.onDestroy()
     }
