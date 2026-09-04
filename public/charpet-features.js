@@ -60,7 +60,8 @@
   function panel(title, body, id) {
     let el = document.getElementById(id);
     if (!el) { el = document.createElement('div'); el.id = id; el.className = 'charpetFeaturePanel'; }
-    el.innerHTML = `<h3>${title}</h3>${body}`;
+    const html = `<h3>${title}</h3>${body}`;
+    if (el.innerHTML !== html) el.innerHTML = html;
     return el;
   }
 
@@ -101,7 +102,8 @@
     if (!el) { el=document.createElement('div'); el.id='charpet-floating-pet'; document.body.appendChild(el); }
     if (!bubble) { bubble=document.createElement('div'); bubble.id='charpet-floating-bubble'; bubble.className='charpetBubble'; document.body.appendChild(bubble); }
     const avatar=currentAvatar();
-    el.innerHTML=avatar?`<img src="${avatar}" alt="CHAR">`:'🐾';
+    const nextHtml=avatar?`<img src="${avatar}" alt="CHAR">`:'🐾';
+    if (el.innerHTML !== nextHtml) el.innerHTML=nextHtml;
     el.style.display=state.floatingPet?'flex':'none';
     el.onclick=()=>{ bubble.textContent=['欸，你看我一下','摸摸我？','我在这里哦','要不要陪我一会儿？'][Math.floor(Math.random()*4)]; bubble.style.display='block'; setTimeout(()=>bubble.style.display='none',2200); logActivity('CHAR 主动叫你','悬浮 CHAR 主动引起了 U 的注意'); };
   }
@@ -123,7 +125,15 @@
 
   injectStyle(); applyTheme();
   document.addEventListener('visibilitychange',()=>{ if(document.hidden){state.awayAt=Date.now();save();} else setTimeout(showAwayReport,120); });
-  const observer=new MutationObserver(()=>{hookNav();refreshHome();refreshSettings();updateFloating();});
+  let observerScheduled = false;
+  const observer=new MutationObserver(()=>{
+    if (observerScheduled) return;
+    observerScheduled = true;
+    queueMicrotask(() => {
+      observerScheduled = false;
+      hookNav(); refreshHome(); refreshSettings(); updateFloating();
+    });
+  });
   observer.observe(document.body,{childList:true,subtree:true});
   hookNav(); refreshHome(); refreshSettings(); updateFloating();
 })();
