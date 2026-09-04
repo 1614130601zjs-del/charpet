@@ -1,4 +1,4 @@
-const CACHE = 'charpet-shell-v1';
+const CACHE = 'charpet-shell-v2';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => {
@@ -6,7 +6,9 @@ self.addEventListener('install', event => {
 });
 
 self.addEventListener('activate', event => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())
+  );
 });
 
 self.addEventListener('fetch', event => {
