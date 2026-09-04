@@ -1,117 +1,113 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-import type { CharAssets, DiaryEntry, PetAction, PetMood, PetRecord, TimelineEntry } from './pet/petTypes';
-import { applyPetEvent, type PetState } from './pet/petRuntime';
-import { createPetEvent, dispatchPetEvent, subscribePetEvents } from './bridge/semanticEvents';
-import { listenForMcpMessages } from './bridge/mcpBridge';
-import { appendPetEventLog } from './bridge/eventLog';
-import { getPetMotion, motionScale } from './pet/petRenderer';
-import { loadPetRecords, savePetRecords, touchPetRecord } from './storage/petStore';
-import { DebugPanel } from './components/DebugPanel';
+import type { PetRecord } from './pet/petTypes';
+import { loadPetRecords, savePetRecords } from './storage/petStore';
 
-type View = 'home' | 'outing' | 'char' | 'timeline' | 'diary';
-const assetSlots: Array<[keyof CharAssets, string]> = [
-  ['idle', '默认'], ['talk', '说话'], ['tap', '触摸'], ['sleep', '睡觉'], ['wake', '醒来'],
-  ['happy', '开心'], ['sad', '难过'], ['angry', '生气'], ['surprised', '惊讶'], ['shy', '害羞'],
-  ['hungry', '求喂'], ['eat', '吃东西'], ['lonely', '想你'],
-];
+type View = 'archive' | 'home' | 'explore' | 'timestamp' | 'info' | 'diary' | 'settings';
+type InfoTab = 'text' | 'gallery';
 
-const addTimeline = (pet: PetRecord, type: TimelineEntry['type'], title: string, detail?: string, effects?: Record<string, number>): PetRecord => ({
-  ...pet, timeline: [{ id: crypto.randomUUID(), createdAt: Date.now(), type, title, detail, effects }, ...(pet.timeline || [])].slice(0, 100),
+const emptyPet = (name: string, image: string): PetRecord => ({
+  id: crypto.randomUUID(), name, image, source: 'upload', createdAt: Date.now(),
+  assets: { idle: image, avatar: image }, userTitle: '主人',
+  needs: { hunger: 70, energy: 80, mood: 70 },
+  relationship: [{ key: 'relationship', label: '关系', value: 0, min: 0, max: 100 }],
+  timeline: [], diary: [], memories: [], stats: { interactions: 0, affection: 0, lastSeenAt: Date.now() }
 });
 
 function App() {
   const [pets, setPets] = useState<PetRecord[]>(loadPetRecords());
-  const [selectedId, setSelectedId] = useState<string | null>(() => loadPetRecords()[0]?.id || null);
-  const [view, setView] = useState<View>('home');
-  const [petState, setPetState] = useState<PetState>({ emotion: 'idle', action: 'idle', intensity: 0.35, speech: '', updatedAt: Date.now(), lastInteractionAt: Date.now(), isSleeping: false });
-  const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
-  const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
-  const [editingName, setEditingName] = useState('');
-  const [editingTitle, setEditingTitle] = useState('主人');
-  const selected = pets.find(p => p.id === selectedId) || null;
-  const motion = getPetMotion(petState);
-  const currentImage = selected ? (selected.assets?.[petState.action] || selected.assets?.[petState.emotion] || selected.assets?.idle || selected.image) : '';
+  const [currentId, setCurrentId] = useState<string | null>(() => loadPetRecords()[0]?.id || null);
+  const [view, setView] = useState<View>('archive');
+  const [infoTab, setInfoTab] = useState<InfoTab>('text');
+  const [settings, setSettings] = useState({ floatingPet: false, mcp: false, timelineFilter: true });
+  const current = pets.find(p => p.id === currentId) || null;
 
   useEffect(() => savePetRecords(pets), [pets]);
-  useEffect(() => {
-    const stopEvents = subscribePetEvents(event => { appendPetEventLog(event); setPetState(s => applyPetEvent(s, event)); });
-    const stopMcp = listenForMcpMessages();
-    return () => { stopEvents(); stopMcp(); };
-  }, []);
-  useEffect(() => { if (selected) { setEditingName(selected.name); setEditingTitle(selected.userTitle || '主人'); } }, [selectedId]);
 
-  const updateSelected = (fn: (pet: PetRecord) => PetRecord) => setPets(all => all.map(p => p.id === selectedId ? fn(p) : p));
-  const timeline = selected?.timeline || [];
-  const diary = selected?.diary || [];
-  const relationship = selected?.relationship || [];
-  const needs = selected?.needs || { hunger: 70, energy: 80, mood: 70 };
+  const updateCurrent = (fn: (p: PetRecord) => PetRecord) => {
+    if (!currentId) return;
+    setPets(all => all.map(p => p.id === currentId ? fn(p) : p));
+  };
 
-  function emit(action: PetAction, emotion: PetMood = 'idle', intensity = 0.8, text?: string) {
-    dispatchPetEvent(createPetEvent(action, emotion, intensity, text));
-    if (selected) updateSelected(p => addTimeline(p, action === 'outing' ? 'outing' : 'interaction', text || action));
-  }
-  function interact(kind: 'tap' | 'touch' | 'feed') {
-    if (!selected) return;
-    if (kind === 'feed') {
-      updateSelected(p => addTimeline({ ...touchPetRecord(p, 2), needs: { ...(p.needs || needs), hunger: Math.min(100, (p.needs?.hunger ?? 70) + 25), mood: Math.min(100, (p.needs?.mood ?? 70) + 4) } }, 'interaction', '喂了一次食物', '饱腹度上升', { hunger: 25, affection: 2 }));
-      emit('tap', 'happy', 0.9, '好吃！'); return;
-    }
-    updateSelected(p => touchPetRecord(addTimeline(p, 'interaction', kind === 'touch' ? '摸摸 Char' : '点击 Char', undefined, { affection: kind === 'touch' ? 2 : 1 }), kind === 'touch' ? 2 : 1));
-    emit('tap', kind === 'touch' ? 'shy' : 'happy', 0.9, kind === 'touch' ? '……被你摸到了' : '嗯？');
-  }
-  function chooseOuting(place: string) {
-    if (!selected) return;
-    updateSelected(p => addTimeline(p, 'outing', `去了${place}`, '等待 AI / 世界书生成这次经历。', { mood: 5, affection: 2 }));
-    emit('outing', 'happy', 0.8, `一起去${place}吧`);
-    setView('timeline');
-  }
-  function saveIdentity() {
-    if (!selected) return;
-    updateSelected(p => ({ ...p, name: editingName.trim() || p.name, userTitle: editingTitle.trim() || '主人', timeline: [{ id: crypto.randomUUID(), createdAt: Date.now(), type: 'system', title: '更新了 Char 身份', detail: `称呼：${editingTitle || '主人'}` }, ...(p.timeline || [])] }));
-  }
-  function uploadRole(file?: File) {
+  function uploadNew(file?: File) {
     if (!file) return;
-    const reader = new FileReader(); reader.onload = () => {
-      const image = String(reader.result); const p: PetRecord = { id: crypto.randomUUID(), name: file.name.replace(/\.[^.]+$/, '') || '新的 Char', image, source: 'upload', createdAt: Date.now(), assets: { idle: image, avatar: image }, userTitle: '主人', needs: { hunger: 70, energy: 80, mood: 70 }, relationship: [{ key: 'affection', label: '好感度', value: 0, min: 0, max: 100 }], timeline: [], diary: [], memories: [], stats: { interactions: 0, affection: 0, lastSeenAt: Date.now() } };
-      setPets(x => [p, ...x]); setSelectedId(p.id); setView('char');
-    }; reader.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = String(reader.result);
+      const pet = emptyPet(file.name.replace(/\.[^.]+$/, '') || '新的 CHAR', image);
+      setPets(all => [pet, ...all]);
+      setCurrentId(pet.id);
+      setView('info');
+      setInfoTab('text');
+    };
+    reader.readAsDataURL(file);
   }
-  function uploadAsset(key: keyof CharAssets, file?: File) {
-    if (!selected || !file) return;
-    const reader = new FileReader(); reader.onload = () => updateSelected(p => ({ ...p, assets: { ...(p.assets || {}), [key]: String(reader.result) } })); reader.readAsDataURL(file);
-  }
-  function uploadAvatar(file?: File) {
-    if (!selected || !file) return;
-    const reader = new FileReader(); reader.onload = () => updateSelected(p => ({ ...p, assets: { ...(p.assets || {}), avatar: String(reader.result) } })); reader.readAsDataURL(file);
-  }
-  function useCurrentImageAsAvatar() {
-    if (!selected) return;
-    updateSelected(p => ({ ...p, assets: { ...(p.assets || {}), avatar: p.image } }));
-  }
-  function addDiary() {
-    if (!selected) return;
-    const entry: DiaryEntry = { id: crypto.randomUUID(), createdAt: Date.now(), title: '今天', text: '这里是 Char 的日记。之后由 AI 根据人设、世界书和当天经历自动生成。', mood: petState.emotion, source: 'ai' };
-    updateSelected(p => addTimeline({ ...p, diary: [entry, ...(p.diary || [])] }, 'diary', '写下了一篇日记'));
-  }
-  function changeRelationship(key: string, delta: number) { updateSelected(p => ({ ...p, relationship: (p.relationship || []).map(r => r.key === key ? { ...r, value: Math.max(r.min, Math.min(r.max, r.value + delta)) } : r) })); }
-  function startDrag(e: React.PointerEvent<HTMLImageElement>) { e.currentTarget.setPointerCapture(e.pointerId); dragStart.current = { x: e.clientX, y: e.clientY, ox: petOffset.x, oy: petOffset.y }; emit('drag', 'surprised', 0.65, '抓到我啦'); }
-  function moveDrag(e: React.PointerEvent<HTMLImageElement>) { setPetOffset({ x: dragStart.current.ox + e.clientX - dragStart.current.x, y: dragStart.current.oy + e.clientY - dragStart.current.y }); }
-  function exportSelected() { if (!selected) return; const blob = new Blob([JSON.stringify(selected, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${selected.name}.charpet.json`; a.click(); }
 
-  const nav = useMemo(() => [['home', '🏠 小窝'], ['outing', '🚶 出去玩'], ['char', '🎨 Char'], ['timeline', '🕐 时间轴'], ['diary', '📖 日记']] as Array<[View, string]>, []);
-  return <main className="app charpetHome">
-    <header><div><span className="eyebrow">CHARPET · HOME</span><h1>{selected?.name || 'CharPet'}</h1><p>{selected ? '让 Char 在这里生活、成长，也可以随时把它带到桌面。' : '去“Char”里添加角色，开始让它在小窝里生活。'}</p></div></header>
-    <nav className="charpetNav">{nav.map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}</nav>
-    {!selected ? <section className="panel charpetEmpty"><h2>还没有 Char</h2><p>角色上传和角色管理统一放在“Char”里，不再占用主界面。</p><button onClick={() => setView('char')}>去 Char 添加角色 →</button></section> : <>
-      {view === 'home' && <section className="homeGrid"><div className="petStage"><div className={`petBubble ${petState.emotion}`}>{petState.speech}</div><img src={currentImage} className={`pet ${motion.className}`} style={{ transform: `translate(${petOffset.x}px,${petOffset.y}px)`, scale: motionScale(petState) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => emit('idle')} draggable={false} alt={selected.name} /><div className="touchActions"><button onClick={() => interact('tap')}>点击</button><button onClick={() => interact('touch')}>摸摸</button><button onClick={() => interact('feed')}>喂食</button><button onClick={() => emit('talk', 'happy', 0.8, '来陪我一会儿吧')}>陪我聊聊</button></div></div><div className="panel statusPanel"><span className="eyebrow">CURRENT STATE</span><h2>{selected.name}</h2><p>正在：{petState.isSleeping ? '睡觉' : petState.action} · 心情：{petState.emotion}</p><div className="stateBars"><span>😊 心情 <b>{needs.mood}</b>/100</span><progress value={needs.mood} max="100" /><span>🍪 饱腹 <b>{needs.hunger}</b>/100</span><progress value={needs.hunger} max="100" /><span>⚡ 精力 <b>{needs.energy}</b>/100</span><progress value={needs.energy} max="100" /></div><div className="relationshipList">{relationship.map(r => <div key={r.key}><span>{r.label}</span><b>{r.value}/{r.max}</b><button onClick={() => changeRelationship(r.key, 1)}>＋</button></div>)}</div><button onClick={() => setView('timeline')}>查看今天的生活 →</button></div></section>}
-      {view === 'outing' && <section className="panel featurePage"><span className="eyebrow">OUTING · STORY</span><h2>带 {selected.name} 出去玩</h2><p>地点只是故事入口。真正发生什么，由 AI 结合人设、世界书、记忆和当前状态决定。</p><div className="choiceGrid">{['公园', '咖啡店', '海边', '书店', '夜晚街道', '随便走走'].map(x => <button key={x} onClick={() => chooseOuting(x)}>{x}</button>)}</div><div className="storyHint">MCP 预留：charpet.event.request → AI / 世界书生成剧情 → 回写 story、choices、effects。</div></section>}
-      {view === 'char' && <section className="panel featurePage"><span className="eyebrow">CHAR · IDENTITY & ASSETS</span><h2>角色设定</h2><div className="charUploadBox"><div><b>角色入口</b><p>所有角色新增、切换和素材管理都集中在这里。</p></div><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadRole(e.target.files?.[0])} /></label></div><div className="identityForm"><label>名字<input value={editingName} onChange={e => setEditingName(e.target.value)} /></label><label>对 User 的称呼<input value={editingTitle} onChange={e => setEditingTitle(e.target.value)} /></label><button onClick={saveIdentity}>保存身份</button></div><div className="profileBox"><b>AI 人设同步</b><p>{selected.profile?.tone || '尚未同步。连接 MCP 后，由 AI 读取自身人设、语气和世界书并写入这里。'}</p><small>{selected.profile?.personality?.join(' · ')}</small></div><h3>大头照</h3><div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap', marginBottom: 20 }}><div style={{ width: 120, height: 120, borderRadius: 24, overflow: 'hidden', background: 'rgba(0,0,0,.05)', display: 'grid', placeItems: 'center', border: '1px solid rgba(0,0,0,.08)' }}>{selected.assets?.avatar ? <img src={selected.assets.avatar as string} alt={`${selected.name} 大头照`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>暂无头像</span>}</div><div style={{ display: 'grid', gap: 8 }}><label className="uploadTop">＋ 上传大头照<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadAvatar(e.target.files?.[0])} /></label><button onClick={useCurrentImageAsAvatar}>使用当前角色图作为大头照</button><small>身份卡会直接读取这里的头像。以后可以再接 AI 生成。</small></div></div><h3>形象素材</h3><div className="assetGrid">{assetSlots.map(([key, label]) => <label key={key} className="assetSlot"><span>{label}</span>{selected.assets?.[key] ? <img src={selected.assets[key] as string} alt={label} /> : <div>＋</div>}<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadAsset(key, e.target.files?.[0])} /></label>)}</div><div className="charActions"><label className="uploadTop">＋ 添加新的动作 / 情绪素材<input hidden type="file" accept="image/*" onChange={e => uploadAsset('custom', e.target.files?.[0])} /></label><button onClick={exportSelected}>导出 Char</button></div><h3>当前 Char</h3><div className="charVersions">{pets.map(p => <button className={p.id === selected.id ? 'active' : ''} key={p.id} onClick={() => { setSelectedId(p.id); setPetOffset({ x: 0, y: 0 }); }}>{p.name}{p.era ? ` · ${p.era}` : ''}</button>)}</div></section>}
-      {view === 'timeline' && <section className="panel featurePage"><span className="eyebrow">LIFE TIMELINE</span><h2>行动时间轴</h2><p>记录剧情、互动、状态变化，以及 AI 写下日志等生活痕迹。</p><div className="timeline">{timeline.length ? timeline.map(x => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.detail}</p>{x.effects && <small>{Object.entries(x.effects).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(' · ')}</small>}</article>) : <div className="empty">还没有生活记录。</div>}</div></section>}
-      {view === 'diary' && <section className="panel featurePage"><span className="eyebrow">DIARY</span><h2>Char 的日记</h2><p>独立于时间轴。这里记录 Char 自己觉得值得留下的东西。</p><button onClick={addDiary}>＋ 生成一篇测试日记</button><div className="diaryList">{diary.length ? diary.map(x => <article key={x.id}><time>{new Date(x.createdAt).toLocaleDateString()}</time><h3>{x.title || '无题'}</h3><p>{x.text}</p></article>) : <div className="empty">还没有日记。之后由 AI 根据世界书和当天经历自动生成。</div>}</div></section>}
-    </>}
-    <DebugPanel />
+  function uploadAvatar(file?: File) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => updateCurrent(p => ({ ...p, image: String(reader.result), assets: { ...(p.assets || {}), avatar: String(reader.result) } }));
+    reader.readAsDataURL(file);
+  }
+
+  function selectChar(id: string) {
+    setCurrentId(id);
+    setView('archive');
+  }
+
+  const nav: Array<[View, string]> = [
+    ['archive', '角色档案'], ['home', '小窝'], ['explore', '出去玩 · 探索'],
+    ['timestamp', '时间戳'], ['info', '角色信息'], ['diary', '日记']
+  ];
+
+  return <main className="app frameworkApp">
+    <header className="frameworkHeader">
+      <div><span className="eyebrow">CHARPET</span><h1>{current?.name || '角色档案'}</h1><p>{current ? '当前 CHAR：' + current.name : '先创建或导入一个 CHAR'}</p></div>
+      <button className="settingsButton" onClick={() => setView('settings')}>⚙ 设置</button>
+    </header>
+
+    <nav className="frameworkNav">
+      {nav.map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}
+    </nav>
+
+    {view === 'archive' && <section className="frameworkPage">
+      <div className="pageTitle"><div><span className="eyebrow">CHAR ARCHIVE</span><h2>角色档案</h2><p>管理所有 CHAR。每个 CHAR 的文字、世界书、图库和生活数据彼此独立。</p></div><label className="primaryButton">＋ 导入 / 创建 CHAR<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadNew(e.target.files?.[0])} /></label></div>
+      <div className="charArchiveList">
+        {pets.map(p => <article key={p.id} className={'charIdCard ' + (p.id === currentId ? 'current' : '')}>
+          <img src={(p.assets?.avatar as string) || p.image} alt={p.name} />
+          <div className="charCardText"><span className="cardLabel">CHAR</span><h3>{p.name}</h3><p>{p.userTitle || '主人'}</p><small>{p.profile?.tone || '尚未填写具体人设'}</small></div>
+          <div className="charCardActions"><button onClick={() => { setCurrentId(p.id); setView('info'); }}>头像 / 信息</button><button onClick={() => { setCurrentId(p.id); setView('home'); }}>进入小窝</button><button onClick={() => selectChar(p.id)}>{p.id === currentId ? '当前 CHAR' : '设为当前'}</button></div>
+        </article>)}
+        <label className="addCharCard"><b>＋</b><span>导入 / 创建新的 CHAR</span><small>首次创建必须提供头像</small><input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadNew(e.target.files?.[0])} /></label>
+      </div>
+    </section>}
+
+    {view === 'home' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">HOME</span><h2>小窝</h2><p>{current ? current.name + ' 的生活空间' : '请先选择 CHAR'}</p></div></div>{current ? <div className="homeFramework"><div className="homePetPlaceholder">{current.image && <img src={(current.assets?.avatar as string) || current.image} alt={current.name} />}<span>桌宠区域</span></div><div className="frameworkPanel"><h3>当前状态</h3><p>心情：{current.needs?.mood ?? 70}　饱腹：{current.needs?.hunger ?? 70}　精力：{current.needs?.energy ?? 80}</p><p>这里承载桌宠、互动、状态与日常生活。</p></div></div> : <EmptyState text="先在角色档案创建 CHAR" />}</section>}
+
+    {view === 'explore' && <section className="frameworkPage"><span className="eyebrow">EXPLORE</span><h2>出去玩</h2><p>探索、外出、场景与剧情入口。后续接入 AI / 世界书 / 记忆。</p><div className="placeholderGrid"><div>🌳 探索地点</div><div>🎭 剧情事件</div><div>🗺️ 新场景</div></div></section>}
+
+    {view === 'timestamp' && <section className="frameworkPage"><span className="eyebrow">TIMESTAMP</span><h2>时间戳</h2><p>记录“什么时候、状态如何、做了什么”。</p><div className="timelinePlaceholder">{current?.timeline?.length ? current.timeline.map((x: any) => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.detail || ''}</p></article>) : <EmptyState text="还没有时间记录" />}</div></section>}
+
+    {view === 'info' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">CHAR INFO</span><h2>{current?.name || '角色信息'}</h2><p>只显示当前 CHAR 自己的数据。</p></div>{current && <label className="secondaryButton">更换头像<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadAvatar(e.target.files?.[0])} /></label>}</div>{current ? <><div className="infoTabs"><button className={infoTab === 'text' ? 'active' : ''} onClick={() => setInfoTab('text')}>① 文字</button><button className={infoTab === 'gallery' ? 'active' : ''} onClick={() => setInfoTab('gallery')}>② 图库</button></div>{infoTab === 'text' ? <TextInfo current={current} updateCurrent={updateCurrent} timelineFilter={settings.timelineFilter} setTimelineFilter={v => setSettings(s => ({ ...s, timelineFilter: v }))} /> : <GalleryInfo current={current} updateCurrent={updateCurrent} />}</> : <EmptyState text="请先选择 CHAR" />}</section>}
+
+    {view === 'diary' && <section className="frameworkPage"><span className="eyebrow">DIARY</span><h2>日记</h2><p>记录 CHAR 对经历的内容。</p><div className="timelinePlaceholder">{current?.diary?.length ? current.diary.map((x: any) => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.text}</p></article>) : <EmptyState text="还没有日记" />}</div></section>}
+
+    {view === 'settings' && <section className="frameworkPage"><span className="eyebrow">SETTINGS</span><h2>设置</h2><p>软件级配置，不属于某个 CHAR。</p><div className="settingsList"><SettingRow title="MCP" desc="配置 MCP 连接与 AI / 外部能力。" value={settings.mcp} onChange={v => setSettings(s => ({ ...s, mcp: v }))} /><SettingRow title="悬浮窗 / 桌宠" desc="开启后让当前 CHAR 出现在桌面悬浮层。" value={settings.floatingPet} onChange={v => setSettings(s => ({ ...s, floatingPet: v }))} /><SettingRow title="世界书时间线筛选" desc="只根据世界书标题识别时间线，不读取正文来判断。" value={settings.timelineFilter} onChange={v => setSettings(s => ({ ...s, timelineFilter: v }))} /></div><div className="frameworkNote">时间线可以由 CHAR 提出，也可以由 U 主动触发；无论来源如何，最终决定权属于 U。</div></section>}
   </main>;
 }
-createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
+
+function TextInfo({ current, updateCurrent, timelineFilter, setTimelineFilter }: { current: PetRecord; updateCurrent: (fn: (p: PetRecord) => PetRecord) => void; timelineFilter: boolean; setTimelineFilter: (v: boolean) => void }) {
+  const profile = current.profile || {} as any;
+  return <div className="infoContent"><label>角色名字<input value={current.name} onChange={e => updateCurrent(p => ({ ...p, name: e.target.value }))} /></label><label>具体人设 / 角色描述<textarea value={(profile as any).description || ''} placeholder="角色描述统一承载原场景、开场白、性格、示例等内容。" onChange={e => updateCurrent(p => ({ ...p, profile: { ...(p.profile || {}), description: e.target.value } as any }))} /></label><div className="twoColumns"><label>当前时间线<input placeholder="例如：男高线 / 男大线 / 人妻线" /></label><label>与 U 的关系<input placeholder="例如：真骨线 / 恋人线 / 人妻线" /></label></div><div className="worldbookBox"><div><h3>世界书</h3><p>可增加、删除、修改、开关词目。</p></div><button>＋ 增加词目</button><div className="worldbookItem"><b>示例词目</b><span>开启</span><button>编辑</button><button>关闭</button></div></div><div className="toggleLine"><div><b>时间线筛选</b><small>只读取世界书标题判断时间线。</small></div><input type="checkbox" checked={timelineFilter} onChange={e => setTimelineFilter(e.target.checked)} /></div></div>;
+}
+
+function GalleryInfo({ current, updateCurrent }: { current: PetRecord; updateCurrent: (fn: (p: PetRecord) => PetRecord) => void }) {
+  const groups = [['头像库', 'avatar'], ['姿势', 'pose'], ['服装库', 'clothes'], ['表情', 'expression'], ['状态', 'state']];
+  return <div className="galleryFramework">{groups.map(([title, key]) => <div className="galleryGroup" key={key}><div><h3>{title}</h3><small>{key === 'clothes' ? '全部由 U 上传，不设预置分类。' : '当前 CHAR 专属素材。'}</small></div><label className="galleryAdd">＋ 添加<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => updateCurrent(p => ({ ...p, assets: { ...(p.assets || {}), [key]: String(r.result) } })); r.readAsDataURL(file); }} /></label>{(current.assets as any)?.[key] && <img src={(current.assets as any)[key]} alt={title} />}</div>)}</div>;
+}
+
+function SettingRow({ title, desc, value, onChange }: { title: string; desc: string; value: boolean; onChange: (v: boolean) => void }) { return <div className="settingRow"><div><h3>{title}</h3><p>{desc}</p></div><button className={value ? 'switch on' : 'switch'} onClick={() => onChange(!value)}>{value ? '开启' : '关闭'}</button></div>; }
+function EmptyState({ text }: { text: string }) { return <div className="emptyFramework">{text}</div>; }
+
+createRoot(document.getElementById('root')!).render(<App />);
