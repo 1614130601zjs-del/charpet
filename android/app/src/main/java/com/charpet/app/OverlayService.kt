@@ -42,6 +42,8 @@ class OverlayService : Service() {
     private var webView: WebView? = null
     private var params: WindowManager.LayoutParams? = null
     private var webPort: WebMessagePort? = null
+    private var userDragging = false
+    private var autonomous: AutonomousPetRuntime? = null
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
 
     override fun onCreate() {
@@ -106,6 +108,30 @@ class OverlayService : Service() {
         params = lp
         if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
+        startAutonomousRuntime(size)
+    }
+
+    private fun startAutonomousRuntime(petSize: Int) {
+        val metrics = resources.displayMetrics
+        autonomous?.stop()
+        autonomous = AutonomousPetRuntime().also { runtime ->
+            runtime.onMove = { move ->
+                if (userDragging) return@let
+                val lp = params ?: return@let
+                val root = overlay ?: return@let
+                lp.x = move.x
+                lp.y = move.y
+                windowManager.updateViewLayout(root, lp)
+            }
+            runtime.onEvent = { event -> sendEventToWeb(event.toJson()) }
+            runtime.start(
+                prefs.getInt(KEY_X, 24),
+                prefs.getInt(KEY_Y, 160),
+                metrics.widthPixels,
+                metrics.heightPixels,
+                petSize,
+            )
+        }
     }
 
     private fun supportsModernBridge(): Boolean =
@@ -144,15 +170,25 @@ class OverlayService : Service() {
         root.setOnTouchListener { _, event ->
             val lp = params ?: return@setOnTouchListener false
             when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { downX = event.rawX; downY = event.rawY; startX = lp.x; startY = lp.y; dragging = false; false }
+                MotionEvent.ACTION_DOWN -> {
+                    downX = event.rawX; downY = event.rawY; startX = lp.x; startY = lp.y
+                    dragging = false; userDragging = false; autonomous?.setPaused(true); false
+                }
                 MotionEvent.ACTION_MOVE -> {
                     val dx = event.rawX - downX; val dy = event.rawY - downY
                     if (!dragging && (kotlin.math.abs(dx) > touchSlop || kotlin.math.abs(dy) > touchSlop)) dragging = true
-                    if (dragging) { lp.x = startX + dx.toInt(); lp.y = startY + dy.toInt(); windowManager.updateViewLayout(root, lp) }
+                    if (dragging) {
+                        userDragging = true
+                        lp.x = startX + dx.toInt(); lp.y = startY + dy.toInt()
+                        windowManager.updateViewLayout(root, lp)
+                        autonomous?.syncPosition(lp.x, lp.y)
+                    }
                     dragging
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     if (dragging) prefs.edit().putInt(KEY_X, lp.x).putInt(KEY_Y, lp.y).apply()
+                    userDragging = false
+                    autonomous?.setPaused(false)
                     dragging
                 }
                 else -> false
@@ -258,6 +294,8 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
+        autonomous?.stop()
+        autonomous = null
         webPort?.close()
         overlay?.let { windowManager.removeView(it) }
         webView?.destroy()
