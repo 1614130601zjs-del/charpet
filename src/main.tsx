@@ -1,97 +1,109 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-import type { PetAction, PetMood, PetRecord } from './pet/petTypes';
+import type { CharAssets, DiaryEntry, PetAction, PetMood, PetRecord, TimelineEntry } from './pet/petTypes';
 import { applyPetEvent, nextIdleState, type PetState } from './pet/petRuntime';
 import { createPetEvent, dispatchPetEvent, subscribePetEvents } from './bridge/semanticEvents';
 import { listenForMcpMessages } from './bridge/mcpBridge';
 import { appendPetEventLog } from './bridge/eventLog';
 import { getPetMotion, motionScale } from './pet/petRenderer';
-import { NativeCreator, type CreatorState } from './creator/NativeCreator';
 import { loadPetRecords, savePetRecords, touchPetRecord } from './storage/petStore';
 import { DebugPanel } from './components/DebugPanel';
 
-type Pet = Omit<PetRecord, 'creatorState'> & { creatorState?: CreatorState };
-
-const moodLines: Record<PetMood, string[]> = {
-  idle: ['嗯……', '陪着你呢', '今天也要加油呀'], happy: ['嘿嘿！', '好开心～', '被你发现啦'], surprised: ['欸？！', '哇！', '你吓到我啦'], sad: ['唔……', '有一点点低落', '抱一下嘛'], angry: ['哼！', '不许欺负我', '我要生气啦'], shy: ['……别一直看啦', '有点害羞', '///'], sleep: ['呼……', 'Zzz……', '晚安……'],
-};
-
+type View = 'home' | 'outing' | 'char' | 'timeline' | 'diary';
 const RENDER_DEPLOY_URL = 'https://render.com/deploy?repo=https://github.com/1614130601zjs-del/charpet';
+const assetSlots: Array<[keyof CharAssets, string]> = [
+  ['idle', '默认'], ['talk', '说话'], ['tap', '触摸'], ['sleep', '睡觉'], ['wake', '醒来'],
+  ['happy', '开心'], ['sad', '难过'], ['angry', '生气'], ['surprised', '惊讶'], ['shy', '害羞'],
+  ['hungry', '求喂'], ['eat', '吃东西'], ['lonely', '想你'],
+];
+
+const addTimeline = (pet: PetRecord, type: TimelineEntry['type'], title: string, detail?: string, effects?: Record<string, number>): PetRecord => ({
+  ...pet, timeline: [{ id: crypto.randomUUID(), createdAt: Date.now(), type, title, detail, effects }, ...(pet.timeline || [])].slice(0, 100),
+});
 
 function App() {
-  const [pets, setPets] = useState<Pet[]>(() => loadPetRecords().map(p => ({ ...p, creatorState: p.creatorState as CreatorState | undefined })));
-  const [selected, setSelected] = useState<Pet | null>(null);
-  const [creatorOpen, setCreatorOpen] = useState(false);
-  const [creatorName, setCreatorName] = useState('我的 Char');
-  const [creatorState, setCreatorState] = useState<CreatorState | undefined>();
+  const [pets, setPets] = useState<PetRecord[]>(loadPetRecords());
+  const [selectedId, setSelectedId] = useState<string | null>(() => loadPetRecords()[0]?.id || null);
+  const [view, setView] = useState<View>('home');
   const [petState, setPetState] = useState<PetState>({ emotion: 'idle', action: 'idle', intensity: 0.35, speech: '', updatedAt: Date.now(), lastInteractionAt: Date.now(), isSleeping: false });
-  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
   const [petOffset, setPetOffset] = useState({ x: 0, y: 0 });
   const dragStart = useRef({ x: 0, y: 0, ox: 0, oy: 0 });
-  const idleTimer = useRef<number | null>(null);
-  const sleepTimer = useRef<number | null>(null);
+  const [editingName, setEditingName] = useState('');
+  const [editingTitle, setEditingTitle] = useState('主人');
+  const selected = pets.find(p => p.id === selectedId) || null;
+  const motion = getPetMotion(petState);
+  const currentImage = selected ? (selected.assets?.[petState.action] || selected.assets?.[petState.emotion] || selected.assets?.idle || selected.image) : '';
 
   useEffect(() => savePetRecords(pets), [pets]);
-  const selectedPet = selected ? pets.find(p => p.id === selected.id) || selected : null;
-  const motion = getPetMotion(petState);
-  const stats = selectedPet?.stats || { interactions: 0, affection: 0, lastSeenAt: Date.now() };
-
-  function touchSelected(affectionDelta = 1) {
-    if (!selectedPet) return;
-    setPets(current => current.map(p => p.id === selectedPet.id ? touchPetRecord(p, affectionDelta) : p));
-  }
-  function emit(action: PetAction, emotion: PetMood = 'idle', intensity = 1, text = '') { dispatchPetEvent(createPetEvent(action, emotion, intensity, text || undefined)); }
-  function randomLine(mood: PetMood) { const lines = moodLines[mood]; return lines[Math.floor(Math.random() * lines.length)]; }
-  function clearTimers() { if (idleTimer.current) window.clearTimeout(idleTimer.current); if (sleepTimer.current) window.clearTimeout(sleepTimer.current); idleTimer.current = null; sleepTimer.current = null; }
-  function armTimers() { clearTimers(); idleTimer.current = window.setTimeout(() => setPetState(s => s.isSleeping ? s : nextIdleState(s)), 1200); sleepTimer.current = window.setTimeout(() => emit('sleep', 'sleep', 0.3, randomLine('sleep')), 18000); }
-
   useEffect(() => {
-    const stopEvents = subscribePetEvents(event => { appendPetEventLog(event); setPetState(s => applyPetEvent(s, event)); if (event.action === 'sleep') clearTimers(); else armTimers(); });
+    const stopEvents = subscribePetEvents(event => { appendPetEventLog(event); setPetState(s => applyPetEvent(s, event)); });
     const stopMcp = listenForMcpMessages();
     return () => { stopEvents(); stopMcp(); };
   }, []);
-  useEffect(() => { armTimers(); return clearTimers; }, [selectedPet?.id]);
+  useEffect(() => { if (selected) { setEditingName(selected.name); setEditingTitle(selected.userTitle || '主人'); } }, [selectedId]);
 
-  function upload(file?: File) {
+  const updateSelected = (fn: (pet: PetRecord) => PetRecord) => setPets(all => all.map(p => p.id === selectedId ? fn(p) : p));
+  const timeline = selected?.timeline || [];
+  const diary = selected?.diary || [];
+  const relationship = selected?.relationship || [];
+  const needs = selected?.needs || { hunger: 70, energy: 80, mood: 70 };
+
+  function emit(action: PetAction, emotion: PetMood = 'idle', intensity = 0.8, text?: string, need?: string) {
+    dispatchPetEvent(createPetEvent(action, emotion, intensity, text));
+    if (selected) updateSelected(p => addTimeline(p, action === 'outing' ? 'outing' : 'interaction', text || action, undefined));
+  }
+  function interact(kind: 'tap' | 'touch' | 'feed') {
+    if (!selected) return;
+    if (kind === 'feed') {
+      updateSelected(p => addTimeline({ ...touchPetRecord(p, 2), needs: { ...(p.needs || needs), hunger: Math.min(100, (p.needs?.hunger ?? 70) + 25), mood: Math.min(100, (p.needs?.mood ?? 70) + 4) } }, 'interaction', '喂了一次食物', '饱腹度上升', { hunger: 25, affection: 2 }));
+      emit('tap', 'happy', 0.9, '好吃！'); return;
+    }
+    updateSelected(p => touchPetRecord(addTimeline(p, 'interaction', kind === 'touch' ? '摸摸 Char' : '点击 Char', undefined, { affection: kind === 'touch' ? 2 : 1 }), kind === 'touch' ? 2 : 1));
+    emit('tap', kind === 'touch' ? 'shy' : 'happy', 0.9, kind === 'touch' ? '……被你摸到了' : '嗯？');
+  }
+  function chooseOuting(place: string) {
+    if (!selected) return;
+    updateSelected(p => addTimeline(p, 'outing', `去了${place}`, '等待 AI / 世界书生成这次经历。', { mood: 5, affection: 2 }));
+    emit('outing', 'happy', 0.8, `一起去${place}吧`);
+    setView('timeline');
+  }
+  function saveIdentity() {
+    if (!selected) return;
+    updateSelected(p => ({ ...p, name: editingName.trim() || p.name, userTitle: editingTitle.trim() || '主人', timeline: [{ id: crypto.randomUUID(), createdAt: Date.now(), type: 'system', title: '更新了 Char 身份', detail: `称呼：${editingTitle || '主人'}` }, ...(p.timeline || [])] }));
+  }
+  function uploadRole(file?: File) {
     if (!file) return;
-    const r = new FileReader();
-    r.onload = () => { const p: Pet = { id: crypto.randomUUID(), name: file.name.replace(/\.[^.]+$/, ''), image: String(r.result), source: 'upload', createdAt: Date.now(), stats: { interactions: 0, affection: 0, lastSeenAt: Date.now() } }; setPets(x => [p, ...x]); setSelected(p); setPetOffset({ x: 0, y: 0 }); emit('wake', 'happy', 0.7, '你好！'); };
-    r.readAsDataURL(file);
+    const reader = new FileReader(); reader.onload = () => {
+      const image = String(reader.result); const p: PetRecord = { id: crypto.randomUUID(), name: file.name.replace(/\.[^.]+$/, '') || '新的 Char', image, source: 'upload', createdAt: Date.now(), assets: { idle: image }, userTitle: '主人', needs: { hunger: 70, energy: 80, mood: 70 }, relationship: [{ key: 'affection', label: '好感度', value: 0, min: 0, max: 100 }], timeline: [], diary: [], memories: [], stats: { interactions: 0, affection: 0, lastSeenAt: Date.now() } };
+      setPets(x => [p, ...x]); setSelectedId(p.id); setView('home');
+    }; reader.readAsDataURL(file);
   }
-  function openCreator(pet?: Pet) { setCreatorName(pet?.name || '我的 Char'); setCreatorState(pet?.creatorState); setCreatorOpen(true); }
-  function saveCreator(name: string, state: CreatorState, image: string) {
-    const old = selectedPet;
-    const p: Pet = { id: old?.id || crypto.randomUUID(), name, image, source: 'creator', createdAt: old?.createdAt || Date.now(), creatorState: state, stats: old?.stats || { interactions: 0, affection: 0, lastSeenAt: Date.now() } };
-    setPets(x => old ? x.map(i => i.id === old.id ? p : i) : [p, ...x]); setSelected(p); setPetOffset({ x: 0, y: 0 }); setCreatorOpen(false); emit('wake', 'happy', 0.8, '捏好啦！');
+  function uploadAsset(key: keyof CharAssets, file?: File) {
+    if (!selected || !file) return;
+    const reader = new FileReader(); reader.onload = () => updateSelected(p => ({ ...p, assets: { ...(p.assets || {}), [key]: String(reader.result) } })); reader.readAsDataURL(file);
   }
-  function exportSelected() {
-    if (!selectedPet) return;
-    const payload = { version: 1, type: 'charpet.pet', name: selectedPet.name, image: selectedPet.image, source: selectedPet.source, creatorState: selectedPet.creatorState, exportedAt: Date.now() };
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/vnd.charpet.pet+json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `${selectedPet.name || 'charpet'}.charpet.json`; a.click();
-    URL.revokeObjectURL(url);
+  function addDiary() {
+    if (!selected) return;
+    const entry: DiaryEntry = { id: crypto.randomUUID(), createdAt: Date.now(), title: '今天', text: '这里是 Char 的日记。之后由 AI 根据人设、世界书和当天经历自动生成。', mood: petState.emotion, source: 'ai' };
+    updateSelected(p => addTimeline({ ...p, diary: [entry, ...(p.diary || [])] }, 'diary', '写下了一篇日记'));
   }
-  function interact() {
-    if (petState.isSleeping || petState.action === 'sleep') { emit('wake', 'happy', 0.8, '醒啦！'); touchSelected(1); return; }
-    const emotion: PetMood = petState.emotion === 'happy' ? 'surprised' : Math.random() > 0.78 ? 'shy' : 'happy';
-    touchSelected(2); emit('tap', emotion, 0.9, randomLine(emotion));
-  }
-  function talk() { if (petState.isSleeping) { emit('wake', 'happy', 0.8, '唔……醒啦'); touchSelected(1); return; } const emotion: PetMood = Math.random() > 0.7 ? 'shy' : 'happy'; touchSelected(1); emit('talk', emotion, 0.8, randomLine(emotion)); }
-  function mood(emotion: PetMood) { if (petState.isSleeping) { emit('wake', 'happy', 0.8, '被你叫醒啦'); touchSelected(1); return; } touchSelected(emotion === 'happy' ? 2 : 1); emit('tap', emotion, 0.75, randomLine(emotion)); }
-  function startDrag(e: React.PointerEvent<HTMLImageElement>) { e.currentTarget.setPointerCapture(e.pointerId); dragStart.current = { x: e.clientX, y: e.clientY, ox: petOffset.x, oy: petOffset.y }; setDrag({ x: e.clientX, y: e.clientY, active: true }); touchSelected(1); emit('drag', 'surprised', 0.65, '抓到我啦'); }
-  function moveDrag(e: React.PointerEvent<HTMLImageElement>) { if (!drag.active) return; setPetOffset({ x: dragStart.current.ox + e.clientX - dragStart.current.x, y: dragStart.current.oy + e.clientY - dragStart.current.y }); }
-  function endDrag() { if (drag.active) emit('idle', 'idle', 0.35); setDrag(d => ({ ...d, active: false })); }
+  function changeRelationship(key: string, delta: number) { updateSelected(p => ({ ...p, relationship: (p.relationship || []).map(r => r.key === key ? { ...r, value: Math.max(r.min, Math.min(r.max, r.value + delta)) } : r) })); }
+  function startDrag(e: React.PointerEvent<HTMLImageElement>) { e.currentTarget.setPointerCapture(e.pointerId); dragStart.current = { x: e.clientX, y: e.clientY, ox: petOffset.x, oy: petOffset.y }; emit('drag', 'surprised', 0.65, '抓到我啦'); }
+  function moveDrag(e: React.PointerEvent<HTMLImageElement>) { setPetOffset({ x: dragStart.current.ox + e.clientX - dragStart.current.x, y: dragStart.current.oy + e.clientY - dragStart.current.y }); }
+  function exportSelected() { if (!selected) return; const blob = new Blob([JSON.stringify(selected, null, 2)], { type: 'application/json' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${selected.name}.charpet.json`; a.click(); }
 
-  return <main className="app">
-    <header><div><span className="eyebrow">CHARPET STUDIO · V1.0</span><h1>养一只属于你的 Char</h1><p>独立运行、可以捏，也可以直接把自己的角色带进来。</p></div><div className="headerActions"><a className="renderDeployOfficial" href={RENDER_DEPLOY_URL} target="_blank" rel="noreferrer" aria-label="Deploy to Render" title="Deploy to Render"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" /></a><button className="creatorTop" onClick={() => openCreator()}>✦ 捏一个 Char</button><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => upload(e.target.files?.[0])} /></label></div></header>
-    <section className="hero"><div className="petStage"><div className={`petBubble ${petState.emotion}`}>{petState.speech}</div>{selectedPet ? <img src={selectedPet.image} className={`pet ${motion.className}`} style={{ transform: `translate(${petOffset.x}px,${petOffset.y}px)`, scale: motionScale(petState) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onClick={interact} draggable={false} alt={selectedPet.name} /> : <div className="placeholder"><div>🐾</div><span>选择一个角色开始</span></div>}</div>
-      <div className="panel"><span className="eyebrow">MY PET</span><h2>{selectedPet?.name || '还没有角色'}</h2><p>{selectedPet ? `状态：${petState.isSleeping ? 'sleeping' : petState.emotion} · ${petState.action}。它会自己待机，安静一会儿还会睡觉。` : '你可以直接上传 PNG / JPG / WebP，或者用本地捏人器。'}</p>
-        {selectedPet && <><div className="petStats"><span>陪伴值 <strong>{stats.affection}</strong>/100</span><span>互动 <strong>{stats.interactions}</strong> 次</span></div><div className="panelActions"><button onClick={interact}>逗一下</button><button onClick={talk}>说句话</button><button onClick={() => mood('shy')}>摸摸它</button><button onClick={() => emit('sleep', 'sleep', 0.3, randomLine('sleep'))}>让它睡</button><button onClick={() => emit('wake', 'happy', 0.8, '早上好！')}>叫醒</button>{selectedPet.source === 'creator' && <button onClick={() => openCreator(selectedPet)}>重新捏</button>}<button onClick={exportSelected}>导出到 Android</button><button onClick={() => { clearTimers(); setSelected(null); setPetOffset({ x: 0, y: 0 }); setPetState(s => nextIdleState(s)); }}>返回角色库</button></div><div className="moodRow"><button onClick={() => mood('happy')}>开心</button><button onClick={() => mood('sad')}>低落</button><button onClick={() => mood('angry')}>生气</button></div></>}
-      </div></section>
-    <section><div className="sectionHead"><h2>角色库</h2><span>{pets.length} 个角色</span></div><div className="grid">{pets.map(p => <button className={`card ${selectedPet?.id === p.id ? 'active' : ''}`} key={p.id} onClick={() => { setSelected(p); setPetOffset({ x: 0, y: 0 }); emit('wake', 'happy', 0.5, '又见面啦'); }}><div className="thumb"><img src={p.image} alt="" /></div><strong>{p.name}</strong><small>{p.source === 'upload' ? '图片导入' : '本地捏人'} · 陪伴 {p.stats?.affection || 0}</small></button>)}<button className="addCard" onClick={() => openCreator()}><span>✦</span><strong>捏一只新的</strong><small>完全本地运行</small></button>{pets.length === 0 && <label className="empty">＋<span>也可以上传第一个角色</span><input hidden type="file" accept="image/*" onChange={e => upload(e.target.files?.[0])} /></label>}</div></section>
-    {creatorOpen && <div className="creatorOverlay"><div className="creatorShell"><NativeCreator initialState={creatorState} initialName={creatorName} onCancel={() => setCreatorOpen(false)} onSave={saveCreator} /></div></div>}
+  const nav = useMemo(() => [['home', '🏠 小窝'], ['outing', '🚶 出去玩'], ['char', '🎨 Char'], ['timeline', '🕐 时间轴'], ['diary', '📖 日记']] as Array<[View, string]>, []);
+  return <main className="app charpetHome">
+    <header><div><span className="eyebrow">CHARPET · HOME</span><h1>{selected?.name || 'CharPet'}</h1><p>{selected ? '让 Char 在这里生活、成长，也可以随时把它带到桌面。' : '上传一个角色，开始让它在小窝里生活。'}</p></div><div className="headerActions"><a className="renderDeployOfficial" href={RENDER_DEPLOY_URL} target="_blank" rel="noreferrer"><img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" /></a><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadRole(e.target.files?.[0])} /></label></div></header>
+    <nav className="charpetNav">{nav.map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}</nav>
+    {!selected ? <section className="panel charpetEmpty"><h2>还没有 Char</h2><p>先上传角色图片。之后可以在“Char”里管理名字、称呼和各种情绪 / 动作素材。</p><label className="uploadTop">＋ 上传第一个角色<input hidden type="file" accept="image/*" onChange={e => uploadRole(e.target.files?.[0])} /></label></section> : <>
+      {view === 'home' && <section className="homeGrid"><div className="petStage"><div className={`petBubble ${petState.emotion}`}>{petState.speech}</div><img src={currentImage} className={`pet ${motion.className}`} style={{ transform: `translate(${petOffset.x}px,${petOffset.y}px)`, scale: motionScale(petState) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={() => emit('idle')} draggable={false} alt={selected.name} /><div className="touchActions"><button onClick={() => interact('tap')}>点击</button><button onClick={() => interact('touch')}>摸摸</button><button onClick={() => interact('feed')}>喂食</button><button onClick={() => emit('talk', 'happy', 0.8, '来陪我一会儿吧')}>陪我聊聊</button></div></div><div className="panel statusPanel"><span className="eyebrow">CURRENT STATE</span><h2>{selected.name}</h2><p>正在：{petState.isSleeping ? '睡觉' : petState.action} · 心情：{petState.emotion}</p><div className="stateBars"><span>😊 心情 <b>{needs.mood}</b>/100</span><progress value={needs.mood} max="100" /><span>🍪 饱腹 <b>{needs.hunger}</b>/100</span><progress value={needs.hunger} max="100" /><span>⚡ 精力 <b>{needs.energy}</b>/100</span><progress value={needs.energy} max="100" /></div><div className="relationshipList">{relationship.map(r => <div key={r.key}><span>{r.label}</span><b>{r.value}/{r.max}</b><button onClick={() => changeRelationship(r.key, 1)}>＋</button></div>)}</div><button onClick={() => setView('timeline')}>查看今天的生活 →</button></div></section>}
+      {view === 'outing' && <section className="panel featurePage"><span className="eyebrow">OUTING · STORY</span><h2>带 {selected.name} 出去玩</h2><p>地点只是故事入口。真正发生什么，由 AI 结合人设、世界书、记忆和当前状态决定。</p><div className="choiceGrid">{['公园', '咖啡店', '海边', '书店', '夜晚街道', '随便走走'].map(x => <button key={x} onClick={() => chooseOuting(x)}>{x}</button>)}</div><div className="storyHint">MCP 预留：charpet.event.request → AI / 世界书生成剧情 → 回写 story、choices、effects。</div></section>}
+      {view === 'char' && <section className="panel featurePage"><span className="eyebrow">CHAR · IDENTITY & ASSETS</span><h2>角色设定</h2><div className="identityForm"><label>名字<input value={editingName} onChange={e => setEditingName(e.target.value)} /></label><label>对 User 的称呼<input value={editingTitle} onChange={e => setEditingTitle(e.target.value)} /></label><button onClick={saveIdentity}>保存身份</button></div><div className="profileBox"><b>AI 人设同步</b><p>{selected.profile?.tone || '尚未同步。连接 MCP 后，由 AI 读取自身人设、语气和世界书并写入这里。'}</p><small>{selected.profile?.personality?.join(' · ')}</small></div><h3>形象素材</h3><div className="assetGrid">{assetSlots.map(([key, label]) => <label key={key} className="assetSlot"><span>{label}</span>{selected.assets?.[key] ? <img src={selected.assets[key]} alt={label} /> : <div>＋</div>}<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadAsset(key, e.target.files?.[0])} /></label>)}</div><div className="charActions"><label className="uploadTop">＋ 添加新的动作 / 情绪素材<input hidden type="file" accept="image/*" onChange={e => uploadAsset('custom', e.target.files?.[0])} /></label><button onClick={exportSelected}>导出 Char</button></div><h3>当前 Char</h3><div className="charVersions">{pets.map(p => <button className={p.id === selected.id ? 'active' : ''} key={p.id} onClick={() => { setSelectedId(p.id); setPetOffset({ x: 0, y: 0 }); }}>{p.name}{p.era ? ` · ${p.era}` : ''}</button>)}</div></section>}
+      {view === 'timeline' && <section className="panel featurePage"><span className="eyebrow">LIFE TIMELINE</span><h2>行动时间轴</h2><p>记录剧情、互动、状态变化，以及 AI 写下日志等生活痕迹。</p><div className="timeline">{timeline.length ? timeline.map(x => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.detail}</p>{x.effects && <small>{Object.entries(x.effects).map(([k, v]) => `${k} ${v > 0 ? '+' : ''}${v}`).join(' · ')}</small>}</article>) : <div className="empty">还没有生活记录。</div>}</div></section>}
+      {view === 'diary' && <section className="panel featurePage"><span className="eyebrow">DIARY</span><h2>Char 的日记</h2><p>独立于时间轴。这里记录 Char 自己觉得值得留下的东西。</p><button onClick={addDiary}>＋ 生成一篇测试日记</button><div className="diaryList">{diary.length ? diary.map(x => <article key={x.id}><time>{new Date(x.createdAt).toLocaleDateString()}</time><h3>{x.title || '无题'}</h3><p>{x.text}</p></article>) : <div className="empty">还没有日记。之后由 AI 根据世界书和当天经历自动生成。</div>}</div></section>}
+    </>}
     <DebugPanel />
   </main>;
 }
