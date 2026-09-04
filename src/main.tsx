@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import './framework.css';
 import type { PetRecord } from './pet/petTypes';
 import { loadPetRecords, savePetRecords } from './storage/petStore';
 
@@ -22,92 +23,25 @@ function App() {
   const [infoTab, setInfoTab] = useState<InfoTab>('text');
   const [settings, setSettings] = useState({ floatingPet: false, mcp: false, timelineFilter: true });
   const current = pets.find(p => p.id === currentId) || null;
-
   useEffect(() => savePetRecords(pets), [pets]);
-
-  const updateCurrent = (fn: (p: PetRecord) => PetRecord) => {
-    if (!currentId) return;
-    setPets(all => all.map(p => p.id === currentId ? fn(p) : p));
-  };
-
-  function uploadNew(file?: File) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = String(reader.result);
-      const pet = emptyPet(file.name.replace(/\.[^.]+$/, '') || '新的 CHAR', image);
-      setPets(all => [pet, ...all]);
-      setCurrentId(pet.id);
-      setView('info');
-      setInfoTab('text');
-    };
-    reader.readAsDataURL(file);
-  }
-
-  function uploadAvatar(file?: File) {
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = () => updateCurrent(p => ({ ...p, image: String(reader.result), assets: { ...(p.assets || {}), avatar: String(reader.result) } }));
-    reader.readAsDataURL(file);
-  }
-
-  function selectChar(id: string) {
-    setCurrentId(id);
-    setView('archive');
-  }
-
-  const nav: Array<[View, string]> = [
-    ['archive', '角色档案'], ['home', '小窝'], ['explore', '出去玩 · 探索'],
-    ['timestamp', '时间戳'], ['info', '角色信息'], ['diary', '日记']
-  ];
-
+  const updateCurrent = (fn: (p: PetRecord) => PetRecord) => { if (currentId) setPets(all => all.map(p => p.id === currentId ? fn(p) : p)); };
+  function uploadNew(file?: File) { if (!file) return; const reader = new FileReader(); reader.onload = () => { const image = String(reader.result); const pet = emptyPet(file.name.replace(/\.[^.]+$/, '') || '新的 CHAR', image); setPets(all => [pet, ...all]); setCurrentId(pet.id); setView('info'); }; reader.readAsDataURL(file); }
+  function uploadAvatar(file?: File) { if (!file) return; const reader = new FileReader(); reader.onload = () => updateCurrent(p => ({ ...p, image: String(reader.result), assets: { ...(p.assets || {}), avatar: String(reader.result) } })); reader.readAsDataURL(file); }
+  const nav: Array<[View, string]> = [['archive','角色档案'],['home','小窝'],['explore','出去玩 · 探索'],['timestamp','时间戳'],['info','角色信息'],['diary','日记']];
   return <main className="app frameworkApp">
-    <header className="frameworkHeader">
-      <div><span className="eyebrow">CHARPET</span><h1>{current?.name || '角色档案'}</h1><p>{current ? '当前 CHAR：' + current.name : '先创建或导入一个 CHAR'}</p></div>
-      <button className="settingsButton" onClick={() => setView('settings')}>⚙ 设置</button>
-    </header>
-
-    <nav className="frameworkNav">
-      {nav.map(([key, label]) => <button key={key} className={view === key ? 'active' : ''} onClick={() => setView(key)}>{label}</button>)}
-    </nav>
-
-    {view === 'archive' && <section className="frameworkPage">
-      <div className="pageTitle"><div><span className="eyebrow">CHAR ARCHIVE</span><h2>角色档案</h2><p>管理所有 CHAR。每个 CHAR 的文字、世界书、图库和生活数据彼此独立。</p></div><label className="primaryButton">＋ 导入 / 创建 CHAR<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadNew(e.target.files?.[0])} /></label></div>
-      <div className="charArchiveList">
-        {pets.map(p => <article key={p.id} className={'charIdCard ' + (p.id === currentId ? 'current' : '')}>
-          <img src={(p.assets?.avatar as string) || p.image} alt={p.name} />
-          <div className="charCardText"><span className="cardLabel">CHAR</span><h3>{p.name}</h3><p>{p.userTitle || '主人'}</p><small>{p.profile?.tone || '尚未填写具体人设'}</small></div>
-          <div className="charCardActions"><button onClick={() => { setCurrentId(p.id); setView('info'); }}>头像 / 信息</button><button onClick={() => { setCurrentId(p.id); setView('home'); }}>进入小窝</button><button onClick={() => selectChar(p.id)}>{p.id === currentId ? '当前 CHAR' : '设为当前'}</button></div>
-        </article>)}
-        <label className="addCharCard"><b>＋</b><span>导入 / 创建新的 CHAR</span><small>首次创建必须提供头像</small><input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadNew(e.target.files?.[0])} /></label>
-      </div>
-    </section>}
-
-    {view === 'home' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">HOME</span><h2>小窝</h2><p>{current ? current.name + ' 的生活空间' : '请先选择 CHAR'}</p></div></div>{current ? <div className="homeFramework"><div className="homePetPlaceholder">{current.image && <img src={(current.assets?.avatar as string) || current.image} alt={current.name} />}<span>桌宠区域</span></div><div className="frameworkPanel"><h3>当前状态</h3><p>心情：{current.needs?.mood ?? 70}　饱腹：{current.needs?.hunger ?? 70}　精力：{current.needs?.energy ?? 80}</p><p>这里承载桌宠、互动、状态与日常生活。</p></div></div> : <EmptyState text="先在角色档案创建 CHAR" />}</section>}
-
-    {view === 'explore' && <section className="frameworkPage"><span className="eyebrow">EXPLORE</span><h2>出去玩</h2><p>探索、外出、场景与剧情入口。后续接入 AI / 世界书 / 记忆。</p><div className="placeholderGrid"><div>🌳 探索地点</div><div>🎭 剧情事件</div><div>🗺️ 新场景</div></div></section>}
-
-    {view === 'timestamp' && <section className="frameworkPage"><span className="eyebrow">TIMESTAMP</span><h2>时间戳</h2><p>记录“什么时候、状态如何、做了什么”。</p><div className="timelinePlaceholder">{current?.timeline?.length ? current.timeline.map((x: any) => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.detail || ''}</p></article>) : <EmptyState text="还没有时间记录" />}</div></section>}
-
-    {view === 'info' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">CHAR INFO</span><h2>{current?.name || '角色信息'}</h2><p>只显示当前 CHAR 自己的数据。</p></div>{current && <label className="secondaryButton">更换头像<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => uploadAvatar(e.target.files?.[0])} /></label>}</div>{current ? <><div className="infoTabs"><button className={infoTab === 'text' ? 'active' : ''} onClick={() => setInfoTab('text')}>① 文字</button><button className={infoTab === 'gallery' ? 'active' : ''} onClick={() => setInfoTab('gallery')}>② 图库</button></div>{infoTab === 'text' ? <TextInfo current={current} updateCurrent={updateCurrent} timelineFilter={settings.timelineFilter} setTimelineFilter={v => setSettings(s => ({ ...s, timelineFilter: v }))} /> : <GalleryInfo current={current} updateCurrent={updateCurrent} />}</> : <EmptyState text="请先选择 CHAR" />}</section>}
-
-    {view === 'diary' && <section className="frameworkPage"><span className="eyebrow">DIARY</span><h2>日记</h2><p>记录 CHAR 对经历的内容。</p><div className="timelinePlaceholder">{current?.diary?.length ? current.diary.map((x: any) => <article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.text}</p></article>) : <EmptyState text="还没有日记" />}</div></section>}
-
-    {view === 'settings' && <section className="frameworkPage"><span className="eyebrow">SETTINGS</span><h2>设置</h2><p>软件级配置，不属于某个 CHAR。</p><div className="settingsList"><SettingRow title="MCP" desc="配置 MCP 连接与 AI / 外部能力。" value={settings.mcp} onChange={v => setSettings(s => ({ ...s, mcp: v }))} /><SettingRow title="悬浮窗 / 桌宠" desc="开启后让当前 CHAR 出现在桌面悬浮层。" value={settings.floatingPet} onChange={v => setSettings(s => ({ ...s, floatingPet: v }))} /><SettingRow title="世界书时间线筛选" desc="只根据世界书标题识别时间线，不读取正文来判断。" value={settings.timelineFilter} onChange={v => setSettings(s => ({ ...s, timelineFilter: v }))} /></div><div className="frameworkNote">时间线可以由 CHAR 提出，也可以由 U 主动触发；无论来源如何，最终决定权属于 U。</div></section>}
+    <header className="frameworkHeader"><div><span className="eyebrow">CHARPET</span><h1>{current?.name || '角色档案'}</h1><p>{current ? '当前 CHAR：' + current.name : '先创建或导入一个 CHAR'}</p></div><button className="settingsButton" onClick={() => setView('settings')}>⚙ 设置</button></header>
+    <nav className="frameworkNav">{nav.map(([key,label]) => <button key={key} className={view===key?'active':''} onClick={() => setView(key)}>{label}</button>)}</nav>
+    {view==='archive' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">CHAR ARCHIVE</span><h2>角色档案</h2><p>管理所有 CHAR。每个 CHAR 的文字、世界书、图库和生活数据彼此独立。</p></div><label className="primaryButton">＋ 导入 / 创建 CHAR<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>uploadNew(e.target.files?.[0])}/></label></div><div className="charArchiveList">{pets.map(p=><article key={p.id} className={'charIdCard '+(p.id===currentId?'current':'')}><img src={(p.assets?.avatar as string)||p.image} alt={p.name}/><div className="charCardText"><span className="cardLabel">CHAR</span><h3>{p.name}</h3><p>{p.userTitle||'主人'}</p><small>{p.profile?.tone||'尚未填写具体人设'}</small></div><div className="charCardActions"><button onClick={()=>{setCurrentId(p.id);setView('info')}}>头像 / 信息</button><button onClick={()=>{setCurrentId(p.id);setView('home')}}>进入小窝</button><button onClick={()=>setCurrentId(p.id)}>{p.id===currentId?'当前 CHAR':'设为当前'}</button></div></article>)}<label className="addCharCard"><b>＋</b><span>导入 / 创建新的 CHAR</span><small>首次创建必须提供头像</small><input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>uploadNew(e.target.files?.[0])}/></label></div></section>}
+    {view==='home' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">HOME</span><h2>小窝</h2><p>{current?current.name+' 的生活空间':'请先选择 CHAR'}</p></div></div>{current?<div className="homeFramework"><div className="homePetPlaceholder">{current.image&&<img src={(current.assets?.avatar as string)||current.image} alt={current.name}/>}<span>桌宠区域</span></div><div className="frameworkPanel"><h3>当前状态</h3><p>心情：{current.needs?.mood??70}　饱腹：{current.needs?.hunger??70}　精力：{current.needs?.energy??80}</p><p>这里承载桌宠、互动、状态与日常生活。</p></div></div>:<EmptyState text="先在角色档案创建 CHAR"/>}</section>}
+    {view==='explore' && <section className="frameworkPage"><span className="eyebrow">EXPLORE</span><h2>出去玩</h2><p>探索、外出、场景与剧情入口。后续接入 AI / 世界书 / 记忆。</p><div className="placeholderGrid"><div>🌳 探索地点</div><div>🎭 剧情事件</div><div>🗺️ 新场景</div></div></section>}
+    {view==='timestamp' && <section className="frameworkPage"><span className="eyebrow">TIMESTAMP</span><h2>时间戳</h2><p>记录“什么时候、状态如何、做了什么”。</p><div className="timelinePlaceholder">{current?.timeline?.length?current.timeline.map((x:any)=><article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.detail||''}</p></article>):<EmptyState text="还没有时间记录"/>}</div></section>}
+    {view==='info' && <section className="frameworkPage"><div className="pageTitle"><div><span className="eyebrow">CHAR INFO</span><h2>{current?.name||'角色信息'}</h2><p>只显示当前 CHAR 自己的数据。</p></div>{current&&<label className="secondaryButton">更换头像<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>uploadAvatar(e.target.files?.[0])}/></label>}</div>{current?<><div className="infoTabs"><button className={infoTab==='text'?'active':''} onClick={()=>setInfoTab('text')}>① 文字</button><button className={infoTab==='gallery'?'active':''} onClick={()=>setInfoTab('gallery')}>② 图库</button></div>{infoTab==='text'?<TextInfo current={current} updateCurrent={updateCurrent} timelineFilter={settings.timelineFilter} setTimelineFilter={v=>setSettings(s=>({...s,timelineFilter:v}))}/>:<GalleryInfo current={current} updateCurrent={updateCurrent}/>}</>:<EmptyState text="请先选择 CHAR"/>}</section>}
+    {view==='diary' && <section className="frameworkPage"><span className="eyebrow">DIARY</span><h2>日记</h2><p>记录 CHAR 对经历的内容。</p><div className="timelinePlaceholder">{current?.diary?.length?current.diary.map((x:any)=><article key={x.id}><time>{new Date(x.createdAt).toLocaleString()}</time><strong>{x.title}</strong><p>{x.text}</p></article>):<EmptyState text="还没有日记"/>}</div></section>}
+    {view==='settings' && <section className="frameworkPage"><span className="eyebrow">SETTINGS</span><h2>设置</h2><p>软件级配置，不属于某个 CHAR。</p><div className="settingsList"><SettingRow title="MCP" desc="配置 MCP 连接与 AI / 外部能力。" value={settings.mcp} onChange={v=>setSettings(s=>({...s,mcp:v}))}/><SettingRow title="悬浮窗 / 桌宠" desc="开启后让当前 CHAR 出现在桌面悬浮层。" value={settings.floatingPet} onChange={v=>setSettings(s=>({...s,floatingPet:v}))}/></div><div className="frameworkNote">时间线筛选：{settings.timelineFilter?'开启':'关闭'}。识别时只读取世界书标题，不读取正文判断。时间线可以由 CHAR 提出，也可以由 U 主动触发；最终决定权属于 U。</div></section>}
   </main>;
 }
-
-function TextInfo({ current, updateCurrent, timelineFilter, setTimelineFilter }: { current: PetRecord; updateCurrent: (fn: (p: PetRecord) => PetRecord) => void; timelineFilter: boolean; setTimelineFilter: (v: boolean) => void }) {
-  const profile = current.profile || {} as any;
-  return <div className="infoContent"><label>角色名字<input value={current.name} onChange={e => updateCurrent(p => ({ ...p, name: e.target.value }))} /></label><label>具体人设 / 角色描述<textarea value={(profile as any).description || ''} placeholder="角色描述统一承载原场景、开场白、性格、示例等内容。" onChange={e => updateCurrent(p => ({ ...p, profile: { ...(p.profile || {}), description: e.target.value } as any }))} /></label><div className="twoColumns"><label>当前时间线<input placeholder="例如：男高线 / 男大线 / 人妻线" /></label><label>与 U 的关系<input placeholder="例如：真骨线 / 恋人线 / 人妻线" /></label></div><div className="worldbookBox"><div><h3>世界书</h3><p>可增加、删除、修改、开关词目。</p></div><button>＋ 增加词目</button><div className="worldbookItem"><b>示例词目</b><span>开启</span><button>编辑</button><button>关闭</button></div></div><div className="toggleLine"><div><b>时间线筛选</b><small>只读取世界书标题判断时间线。</small></div><input type="checkbox" checked={timelineFilter} onChange={e => setTimelineFilter(e.target.checked)} /></div></div>;
-}
-
-function GalleryInfo({ current, updateCurrent }: { current: PetRecord; updateCurrent: (fn: (p: PetRecord) => PetRecord) => void }) {
-  const groups = [['头像库', 'avatar'], ['姿势', 'pose'], ['服装库', 'clothes'], ['表情', 'expression'], ['状态', 'state']];
-  return <div className="galleryFramework">{groups.map(([title, key]) => <div className="galleryGroup" key={key}><div><h3>{title}</h3><small>{key === 'clothes' ? '全部由 U 上传，不设预置分类。' : '当前 CHAR 专属素材。'}</small></div><label className="galleryAdd">＋ 添加<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => updateCurrent(p => ({ ...p, assets: { ...(p.assets || {}), [key]: String(r.result) } })); r.readAsDataURL(file); }} /></label>{(current.assets as any)?.[key] && <img src={(current.assets as any)[key]} alt={title} />}</div>)}</div>;
-}
-
-function SettingRow({ title, desc, value, onChange }: { title: string; desc: string; value: boolean; onChange: (v: boolean) => void }) { return <div className="settingRow"><div><h3>{title}</h3><p>{desc}</p></div><button className={value ? 'switch on' : 'switch'} onClick={() => onChange(!value)}>{value ? '开启' : '关闭'}</button></div>; }
-function EmptyState({ text }: { text: string }) { return <div className="emptyFramework">{text}</div>; }
-
-createRoot(document.getElementById('root')!).render(<App />);
+function TextInfo({current,updateCurrent,timelineFilter,setTimelineFilter}:{current:PetRecord;updateCurrent:(fn:(p:PetRecord)=>PetRecord)=>void;timelineFilter:boolean;setTimelineFilter:(v:boolean)=>void}){const profile=current.profile as any||{};return <div className="infoContent"><label>角色名字<input value={current.name} onChange={e=>updateCurrent(p=>({...p,name:e.target.value}))}/></label><label>具体人设 / 角色描述<textarea value={profile.description||''} placeholder="角色描述统一承载原场景、开场白、性格、示例等内容。" onChange={e=>updateCurrent(p=>({...p,profile:{...(p.profile||{}),description:e.target.value} as any}))}/></label><div className="twoColumns"><label>当前时间线<input placeholder="男高线 / 男大线 / 人妻线"/></label><label>与 U 的关系<input placeholder="真骨线 / 恋人线 / 人妻线"/></label></div><div className="worldbookBox"><div><h3>世界书</h3><p>可增加、删除、修改、开关词目。</p></div><button>＋ 增加词目</button><div className="worldbookItem"><b>示例词目</b><span>开启</span><button>编辑</button><button>关闭</button></div></div><div className="toggleLine"><div><b>时间线筛选</b><small>只读取世界书标题判断时间线。</small></div><input type="checkbox" checked={timelineFilter} onChange={e=>setTimelineFilter(e.target.checked)}/></div></div>}
+function GalleryInfo({current,updateCurrent}:{current:PetRecord;updateCurrent:(fn:(p:PetRecord)=>PetRecord)=>void}){const groups=[['头像库','avatar'],['姿势','pose'],['服装库','clothes'],['表情','expression'],['状态','state']];return <div className="galleryFramework">{groups.map(([title,key])=><div className="galleryGroup" key={key}><div><h3>{title}</h3><small>{key==='clothes'?'全部由 U 上传，不设预置分类。':'当前 CHAR 专属素材。'}</small></div><label className="galleryAdd">＋ 添加<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{const file=e.target.files?.[0];if(!file)return;const r=new FileReader();r.onload=()=>updateCurrent(p=>({...p,assets:{...(p.assets||{}),[key]:String(r.result)}}));r.readAsDataURL(file)}}/></label>{(current.assets as any)?.[key]&&<img src={(current.assets as any)[key]} alt={title}/>}</div>)}</div>}
+function SettingRow({title,desc,value,onChange}:{title:string;desc:string;value:boolean;onChange:(v:boolean)=>void}){return <div className="settingRow"><div><h3>{title}</h3><p>{desc}</p></div><button className={value?'switch on':'switch'} onClick={()=>onChange(!value)}>{value?'开启':'关闭'}</button></div>}
+function EmptyState({text}:{text:string}){return <div className="emptyFramework">{text}</div>}
+createRoot(document.getElementById('root')!).render(<App/>);
