@@ -1,39 +1,14 @@
-/**
- * Browser-safe parser for SillyTavern / Tavern Character Card PNGs.
- * Supports V2/V3 `chara` / `ccv3` tEXt chunks plus zTXt/iTXt variants.
- * No third-party dependency.
- */
+/** Minimal SillyTavern V2/V3 PNG importer for CharPet. */
 
+export type TavernWorldbookEntry = Record<string, unknown>;
 export type TavernCharacterBook = {
   name?: string;
   description?: string;
-  scan_depth?: number;
-  token_budget?: number;
-  recursive_scanning?: boolean;
-  extensions?: Record<string, unknown>;
-  entries?: Array<Record<string, unknown>>;
+  entries?: TavernWorldbookEntry[];
   [key: string]: unknown;
 };
 
-export type TavernCharacterData = {
-  name: string;
-  description: string;
-  personality: string;
-  scenario: string;
-  first_mes: string;
-  mes_example: string;
-  creatorcomment: string;
-  avatar: string;
-  talkativeness?: number;
-  fav?: boolean;
-  tags?: string[];
-  spec?: string;
-  spec_version?: string;
-  data?: Record<string, unknown>;
-  character_book?: TavernCharacterBook;
-  [key: string]: unknown;
-};
-
+/** Only fields CharPet actually needs; the original card payload is not retained. */
 export type TavernCardImport = {
   format: 'png';
   spec: 'v1' | 'v2' | 'v3';
@@ -43,15 +18,12 @@ export type TavernCardImport = {
   scenario: string;
   firstMessage: string;
   messageExamples: string;
-  creatorComment: string;
   tags: string[];
   characterBook?: TavernCharacterBook;
-  raw: Record<string, unknown>;
 };
 
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_CARD_BYTES = 20 * 1024 * 1024;
-const MAX_PAYLOAD_BYTES = 20 * 1024 * 1024;
 
 function ascii(bytes: Uint8Array): string {
   return new TextDecoder('latin1').decode(bytes);
@@ -65,25 +37,16 @@ function readU32(bytes: Uint8Array, offset: number): number {
   return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
 }
 
-function inflate(bytes: Uint8Array): Uint8Array {
-  // Browser CompressionStream is available in modern Chromium/Android WebView.
-  // Keep this isolated so a fallback can be added without changing the parser.
-  throw new Error(`zTXt compression is not supported by this runtime (${bytes.length} bytes)`);
-}
-
 function decodeBase64(value: string): Uint8Array {
-  const normalized = value.replace(/\s+/g, '');
-  const binary = atob(normalized);
+  const binary = atob(value.replace(/\s+/g, ''));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
 }
 
-function maybeDecodePayload(value: string): Record<string, unknown> | null {
+function decodePayload(value: string): Record<string, unknown> | null {
   try {
-    const decoded = decodeBase64(value);
-    if (decoded.byteLength > MAX_PAYLOAD_BYTES) return null;
-    const text = utf8(decoded);
+    const text = utf8(decodeBase64(value));
     const parsed = JSON.parse(text);
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
   } catch {
@@ -92,14 +55,14 @@ function maybeDecodePayload(value: string): Record<string, unknown> | null {
 }
 
 function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3'): TavernCardImport {
-  const data = (payload.data && typeof payload.data === 'object')
+  const data = payload.data && typeof payload.data === 'object'
     ? payload.data as Record<string, unknown>
     : payload;
 
   const tags = Array.isArray(data.tags)
-    ? data.tags.filter((x): x is string => typeof x === 'string')
+    ? data.tags.filter((value): value is string => typeof value === 'string')
     : typeof data.tags === 'string'
-      ? data.tags.split(',').map(x => x.trim()).filter(Boolean)
+      ? data.tags.split(',').map(value => value.trim()).filter(Boolean)
       : [];
 
   const characterBook = data.character_book && typeof data.character_book === 'object'
@@ -115,18 +78,16 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
     scenario: typeof data.scenario === 'string' ? data.scenario : '',
     firstMessage: typeof data.first_mes === 'string' ? data.first_mes : '',
     messageExamples: typeof data.mes_example === 'string' ? data.mes_example : '',
-    creatorComment: typeof data.creatorcomment === 'string' ? data.creatorcomment : '',
     tags,
     characterBook,
-    raw: payload,
   };
 }
 
-/** Parse a SillyTavern V2/V3 character-card PNG. */
+/** Parse a standard Tavern/SillyTavern character-card PNG. */
 export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): TavernCardImport {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   if (bytes.byteLength > MAX_CARD_BYTES) throw new Error('Character card is too large');
-  if (bytes.byteLength < 8 || !PNG_SIGNATURE.every((v, i) => bytes[i] === v)) {
+  if (bytes.byteLength < 8 || !PNG_SIGNATURE.every((value, index) => bytes[index] === value)) {
     throw new Error('Not a PNG character card');
   }
 
@@ -148,23 +109,15 @@ export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): Tave
       if (split >= 0) {
         const key = ascii(data.subarray(0, split));
         const value = ascii(data.subarray(split + 1));
-        if (key === 'ccv3') v3 = maybeDecodePayload(value);
+        if (key === 'ccv3') v3 = decodePayload(value);
         if (key === 'chara') {
-          const decoded = maybeDecodePayload(value);
+          const decoded = decodePayload(value);
           if (decoded) {
-            // A normal V2 card wraps fields in `data`; a few older cards are flat.
             if (decoded.data && typeof decoded.data === 'object') v2 = decoded;
             else v1 = decoded;
           }
         }
       }
-    }
-
-    // zTXt/iTXt are recognized so the format detector can report the right key,
-    // but decompression is intentionally isolated for WebView compatibility.
-    if (type === 'zTXt' || type === 'iTXt') {
-      // Standard Tavern exporters normally use tEXt. Leave these chunks untouched
-      // rather than silently mis-decoding them.
     }
 
     offset = dataEnd + 4;
