@@ -1,6 +1,5 @@
 package com.charpet.app
 
-import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
@@ -69,7 +68,11 @@ class OverlayService : Service() {
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
             settings.allowContentAccess = false
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView?, url: String?) {
+                    if (view != null && webPort == null) setupMessageChannel(view)
+                }
+            }
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
         installDrag(root)
@@ -113,7 +116,7 @@ class OverlayService : Service() {
         webView?.post {
             webPort?.postMessage(WebMessage(json)) ?: run {
                 val safe = org.json.JSONObject.quote(json)
-                webView?.evaluateJavascript("window.__charpetReceive && window.__charpetReceive($safe)", null)
+                webView?.evaluateJavascript("window.__charpetReceive && window.__charpetReceive(JSON.parse($safe))", null)
             }
         }
     }
@@ -124,7 +127,7 @@ class OverlayService : Service() {
         webPort?.setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
                 val payload = message.data ?: return
-                if (payload.contains("charpet.event")) sendEventToWeb(payload)
+                if (payload.contains("\"type\":\"charpet.event\"")) sendEventToWeb(payload)
             }
         })
         view.postWebMessage(WebMessage(null, arrayOf(channel[1])), android.net.Uri.parse(ORIGIN))
@@ -139,7 +142,7 @@ class OverlayService : Service() {
         <style>
           html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
           body{display:grid;place-items:center;font-family:system-ui}
-          #pet{width:168px;height:168px;object-fit:contain;filter:drop-shadow(0 12px 18px #0002);user-select:none;transition:transform .18s;}
+          #pet{width:168px;height:168px;object-fit:contain;filter:drop-shadow(0 12px 18px #0002);user-select:none;transition:transform .18s}
           #bubble{position:absolute;top:4px;max-width:190px;background:#fffdf9;border:1px solid #ddd7ce;border-radius:999px;padding:5px 10px;font-size:12px;opacity:0;transition:.2s;z-index:2}
           #bubble.show{opacity:1}.happy{animation:bounce .5s ease-in-out}.sleep{animation:float 2s ease-in-out infinite;opacity:.72}.surprised{animation:pop .45s ease}.angry{animation:shake .35s ease}.shy{animation:shy .6s ease}
           @keyframes bounce{50%{transform:scale(1.1) rotate(-3deg)}} @keyframes pop{50%{transform:scale(1.12)}} @keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}} @keyframes shy{50%{transform:scale(.94) rotate(2deg)}} @keyframes float{50%{transform:translateY(7px) scale(.97)}}
@@ -154,7 +157,7 @@ class OverlayService : Service() {
             if(e.emotion==='sleep'||e.action==='sleep')pet.classList.add('sleep');else pet.classList.remove('sleep');
           }
           window.__charpetReceive=render;
-          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);});
+          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data); if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
           render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
         """.replace("$image", image).replace("$name", name)
