@@ -1,6 +1,5 @@
 package com.charpet.app
 
-import android.net.Uri
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.util.Base64
@@ -28,10 +27,10 @@ object CharPetRenderer {
         val mark = marks.getOrElse(s.optInt("facemark", 0)) { "" }
         val acc = accessories.getOrElse(s.optInt("accessory", 0)) { "" }
         val mouth = when (s.optInt("mouth", 0)) {
-            1 -> "<ellipse cx='120' cy='160' rx='9' ry='7' fill='#713f43'/>'"
-            2 -> "<circle cx='120' cy='160' r='3' fill='#8f5549'/>'"
-            3 -> "<path d='M108 158l12 7 12-7' fill='none' stroke='#8f5549' stroke-width='3' stroke-linecap='round'/>'"
-            else -> "<path d='M108 157Q120 166 132 157' fill='none' stroke='#8f5549' stroke-width='4' stroke-linecap='round'/>'"
+            1 -> "<ellipse cx='120' cy='160' rx='9' ry='7' fill='#713f43'/>"
+            2 -> "<circle cx='120' cy='160' r='3' fill='#8f5549'/>"
+            3 -> "<path d='M108 158l12 7 12-7' fill='none' stroke='#8f5549' stroke-width='3' stroke-linecap='round'/>"
+            else -> "<path d='M108 157Q120 166 132 157' fill='none' stroke='#8f5549' stroke-width='4' stroke-linecap='round'/>"
         }
         val ear = if (s.optInt("earhair", 0) == 0) "" else "<path d='M57 103Q34 80 49 58Q72 68 79 99Z M183 103Q206 80 191 58Q168 68 161 99Z' fill='$h'/>"
         val back = if (s.optInt("back1", 0) == 0) "" else "<path d='M48 126Q38 38 120 35Q202 38 192 126Q174 75 120 73Q66 75 48 126Z' fill='${hair.getOrElse(s.optInt("back1")) { hair[0] }}' opacity='.9'/>"
