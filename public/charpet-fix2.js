@@ -16,9 +16,8 @@ function addThemePanel(){if(!document.querySelector('.cpPage')||!document.queryS
 function saveThemeName(n){const t=themes[n];if(t){localStorage.setItem(THEME,JSON.stringify(t));applyTheme(t)}}
 function cleanCardText(){document.querySelectorAll('.charCard .cpDefinition').forEach(x=>x.remove());document.querySelectorAll('.charCard').forEach(card=>{card.querySelectorAll('.charMeta .description,.charMeta .relationship,.charMeta .timeline,.charMeta [data-definition]').forEach(x=>x.remove())})}
 function moveWorldbookControls(){const section=document.querySelector('.profileText .section');if(!section)return;const head=section.querySelector('.sectionHead');const wb=section.querySelector('.wb');if(!head||!wb)return;const controls=[...head.querySelectorAll('[data-wb-add],[data-recognize]')];if(!controls.length)return;let bottom=section.querySelector('.wbControls');if(!bottom){bottom=document.createElement('div');bottom.className='wbControls';bottom.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';section.appendChild(bottom)}controls.forEach(x=>bottom.appendChild(x));}
-function restoreScroll(y){requestAnimationFrame(()=>window.scrollTo(0,y))}
 function wire(){applyTheme(getTheme());themeCss();addThemePanel();cleanCardText();moveWorldbookControls()}
-let scheduled=false;const schedule=()=>{if(scheduled)return;scheduled=true;const y=window.scrollY;requestAnimationFrame(()=>{scheduled=false;wire();restoreScroll(y)})};
+let scheduled=false;const schedule=()=>{if(scheduled)return;scheduled=true;requestAnimationFrame(()=>{scheduled=false;wire()})};
 document.addEventListener('click',e=>{const t=e.target.closest('[data-theme]');if(t){e.preventDefault();saveThemeName(t.dataset.theme);return}const c=e.target.closest('[data-theme-custom]');if(c){const update=()=>{const next={...getTheme(),accent:c.value};localStorage.setItem(THEME,JSON.stringify(next));applyTheme(next)};c.addEventListener('input',update,{once:true});update();return}},true);
 new MutationObserver(schedule).observe(document.body,{childList:true,subtree:true});setTimeout(wire,50);
 })();
