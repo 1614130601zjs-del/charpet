@@ -9,15 +9,16 @@ import { appendPetEventLog } from './bridge/eventLog';
 import { getPetMotion, motionScale } from './pet/petRenderer';
 import { NativeCreator, type CreatorState } from './creator/NativeCreator';
 import { loadPetRecords, savePetRecords, touchPetRecord } from './storage/petStore';
+import { DebugPanel } from './components/DebugPanel';
 
-type Pet = PetRecord & { creatorState?: CreatorState };
+type Pet = Omit<PetRecord, 'creatorState'> & { creatorState?: CreatorState };
 
 const moodLines: Record<PetMood, string[]> = {
   idle: ['嗯……', '陪着你呢', '今天也要加油呀'], happy: ['嘿嘿！', '好开心～', '被你发现啦'], surprised: ['欸？！', '哇！', '你吓到我啦'], sad: ['唔……', '有一点点低落', '抱一下嘛'], angry: ['哼！', '不许欺负我', '我要生气啦'], shy: ['……别一直看啦', '有点害羞', '///'], sleep: ['呼……', 'Zzz……', '晚安……'],
 };
 
 function App() {
-  const [pets, setPets] = useState<Pet[]>(loadPetRecords as () => Pet[]);
+  const [pets, setPets] = useState<Pet[]>(() => loadPetRecords().map(p => ({ ...p, creatorState: p.creatorState as CreatorState | undefined })));
   const [selected, setSelected] = useState<Pet | null>(null);
   const [creatorOpen, setCreatorOpen] = useState(false);
   const [creatorName, setCreatorName] = useState('我的 Char');
@@ -74,13 +75,14 @@ function App() {
   function endDrag() { if (drag.active) emit('idle', 'idle', 0.35); setDrag(d => ({ ...d, active: false })); }
 
   return <main className="app">
-    <header><div><span className="eyebrow">CHARPET STUDIO · V0.9</span><h1>养一只属于你的 Char</h1><p>独立运行、可以捏，也可以直接把自己的角色带进来。</p></div><div className="headerActions"><button className="creatorTop" onClick={() => openCreator()}>✦ 捏一个 Char</button><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => upload(e.target.files?.[0])} /></label></div></header>
+    <header><div><span className="eyebrow">CHARPET STUDIO · V1.0</span><h1>养一只属于你的 Char</h1><p>独立运行、可以捏，也可以直接把自己的角色带进来。</p></div><div className="headerActions"><button className="creatorTop" onClick={() => openCreator()}>✦ 捏一个 Char</button><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => upload(e.target.files?.[0])} /></label></div></header>
     <section className="hero"><div className="petStage"><div className={`petBubble ${petState.emotion}`}>{petState.speech}</div>{selectedPet ? <img src={selectedPet.image} className={`pet ${motion.className}`} style={{ transform: `translate(${petOffset.x}px,${petOffset.y}px)`, scale: motionScale(petState) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onClick={interact} draggable={false} alt={selectedPet.name} /> : <div className="placeholder"><div>🐾</div><span>选择一个角色开始</span></div>}</div>
       <div className="panel"><span className="eyebrow">MY PET</span><h2>{selectedPet?.name || '还没有角色'}</h2><p>{selectedPet ? `状态：${petState.isSleeping ? 'sleeping' : petState.emotion} · ${petState.action}。它会自己待机，安静一会儿还会睡觉。` : '你可以直接上传 PNG / JPG / WebP，或者用本地捏人器。'}</p>
         {selectedPet && <><div className="petStats"><span>陪伴值 <strong>{stats.affection}</strong>/100</span><span>互动 <strong>{stats.interactions}</strong> 次</span></div><div className="panelActions"><button onClick={interact}>逗一下</button><button onClick={talk}>说句话</button><button onClick={() => mood('shy')}>摸摸它</button><button onClick={() => emit('sleep', 'sleep', 0.3, randomLine('sleep'))}>让它睡</button><button onClick={() => emit('wake', 'happy', 0.8, '早上好！')}>叫醒</button>{selectedPet.source === 'creator' && <button onClick={() => openCreator(selectedPet)}>重新捏</button>}<button onClick={() => { clearTimers(); setSelected(null); setPetOffset({ x: 0, y: 0 }); setPetState(s => nextIdleState(s)); }}>返回角色库</button></div><div className="moodRow"><button onClick={() => mood('happy')}>开心</button><button onClick={() => mood('sad')}>低落</button><button onClick={() => mood('angry')}>生气</button></div></>}
       </div></section>
     <section><div className="sectionHead"><h2>角色库</h2><span>{pets.length} 个角色</span></div><div className="grid">{pets.map(p => <button className={`card ${selectedPet?.id === p.id ? 'active' : ''}`} key={p.id} onClick={() => { setSelected(p); setPetOffset({ x: 0, y: 0 }); emit('wake', 'happy', 0.5, '又见面啦'); }}><div className="thumb"><img src={p.image} alt="" /></div><strong>{p.name}</strong><small>{p.source === 'upload' ? '图片导入' : '本地捏人'} · 陪伴 {p.stats?.affection || 0}</small></button>)}<button className="addCard" onClick={() => openCreator()}><span>✦</span><strong>捏一只新的</strong><small>完全本地运行</small></button>{pets.length === 0 && <label className="empty">＋<span>也可以上传第一个角色</span><input hidden type="file" accept="image/*" onChange={e => upload(e.target.files?.[0])} /></label>}</div></section>
     {creatorOpen && <div className="creatorOverlay"><div className="creatorShell"><NativeCreator initialState={creatorState} initialName={creatorName} onCancel={() => setCreatorOpen(false)} onSave={saveCreator} /></div></div>}
+    <DebugPanel />
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<React.StrictMode><App /></React.StrictMode>);
