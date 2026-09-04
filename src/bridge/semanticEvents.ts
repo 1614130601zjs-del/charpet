@@ -5,6 +5,8 @@ export function createPetEvent(
   emotion: PetMood = 'idle',
   intensity = 1,
   text?: string,
+  need?: string,
+  context?: Record<string, unknown>,
 ): SemanticPetEvent {
   return {
     type: 'charpet.event',
@@ -13,6 +15,8 @@ export function createPetEvent(
     intensity: Math.max(0, Math.min(1, intensity)),
     text,
     timestamp: Date.now(),
+    need,
+    context,
   };
 }
 
