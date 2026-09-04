@@ -26,6 +26,8 @@ export type CharAnimationAssets = { breathe?: string; blink?: string; talk?: str
 
 /** Modular assets: pose, expression, parts and animation are independent layers. */
 export type CharAssets = {
+  /** Portrait used by the future identity-card/archive UI. */
+  avatar?: string;
   poses?: CharPoseAssets;
   expressions?: CharExpressionAssets;
   parts?: CharPartAssets;
