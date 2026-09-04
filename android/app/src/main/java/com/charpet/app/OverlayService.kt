@@ -128,9 +128,11 @@ class OverlayService : Service() {
                     val payload = message.data ?: return
                     if (payload == "charpet.ready") {
                         replyProxy.postMessage("charpet.ready")
-                    } else if (CharPetEvent.parse(payload) != null) {
-                        replyProxy.postMessage("ok")
+                        return
                     }
+                    val event = CharPetEvent.parse(payload) ?: return
+                    sendEventToWeb(event.toJson())
+                    replyProxy.postMessage(event.toJson())
                 }
             }
         )
@@ -174,9 +176,8 @@ class OverlayService : Service() {
         webPort = channel[0]
         webPort?.setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
-                if (CharPetEvent.parse(message.data ?: "") != null) {
-                    // Legacy channel is receive-only for now; native remains the event source.
-                }
+                val event = CharPetEvent.parse(message.data ?: "") ?: return
+                sendEventToWeb(event.toJson())
             }
         })
         view.postWebMessage(WebMessage(null, arrayOf(channel[1])), android.net.Uri.parse(ORIGIN))
