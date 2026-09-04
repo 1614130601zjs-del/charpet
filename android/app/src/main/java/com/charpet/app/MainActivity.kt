@@ -7,13 +7,28 @@ import android.provider.Settings
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
+    private lateinit var store: CharPetStore
+
+    private val importPet = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val json = contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+            status.text = if (json != null && store.saveExport(json)) {
+                "角色已导入：${store.name()}\n现在可以启动悬浮桌宠。"
+            } else "导入失败：请选择 CharPet 导出的 .charpet.json 文件。"
+        } catch (_: Exception) {
+            status.text = "导入失败：无法读取这个角色文件。"
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        store = CharPetStore(this)
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -31,6 +46,10 @@ class MainActivity : AppCompatActivity() {
             text = "启动桌宠"
             setOnClickListener { startPet() }
         }
+        val import = Button(this).apply {
+            text = "导入 Web Studio 角色"
+            setOnClickListener { importPet.launch(arrayOf("application/json", "text/plain", "*/*")) }
+        }
         val demo = Button(this).apply {
             text = "给桌宠发一句话"
             setOnClickListener {
@@ -41,6 +60,7 @@ class MainActivity : AppCompatActivity() {
         root.addView(title)
         root.addView(status)
         root.addView(button)
+        root.addView(import)
         root.addView(demo)
         setContentView(root)
         refreshStatus()
@@ -52,8 +72,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshStatus() {
+        val pet = store.image()
         status.text = if (Settings.canDrawOverlays(this)) {
-            "悬浮窗权限：已开启\n点击按钮即可显示桌宠。"
+            "悬浮窗权限：已开启\n角色：${if (pet != null) store.name() else "尚未导入"}"
         } else {
             "悬浮窗权限：未开启\n第一次使用需要允许 CharPet 显示在其他应用上层。"
         }
@@ -64,8 +85,7 @@ class MainActivity : AppCompatActivity() {
             startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
             return
         }
-        val intent = Intent(this, OverlayService::class.java)
-        startForegroundService(intent)
+        startForegroundService(Intent(this, OverlayService::class.java))
         refreshStatus()
     }
 
