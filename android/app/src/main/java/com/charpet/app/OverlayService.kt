@@ -136,27 +136,56 @@ class OverlayService : Service() {
     private fun html(): String {
         val pet = CharPetStore(this).load()
         val name = org.json.JSONObject.quote(pet?.optString("name", "我的 Char") ?: "我的 Char")
-        val image = pet?.let { CharPetRenderer.imageFor(it) }?.let { org.json.JSONObject.quote(it) } ?: "null"
+        val inlineSvg = pet?.let { CharPetRenderer.inlineSvgFor(it) }
+        val customImage = pet?.let { CharPetRenderer.imageFor(it) }
+        val visual = if (inlineSvg != null) inlineSvg else {
+            val src = org.json.JSONObject.quote(customImage ?: "")
+            "<img id='petImage' alt='CharPet' src=$src>"
+        }
         return """
-        <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+        <!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>
         <style>
           html,body{margin:0;width:100%;height:100%;background:transparent;overflow:hidden}
           body{display:grid;place-items:center;font-family:system-ui}
-          #pet{width:168px;height:168px;object-fit:contain;filter:drop-shadow(0 12px 18px #0002);user-select:none;transition:transform .18s}
+          #pet{width:168px;height:210px;display:grid;place-items:center;filter:drop-shadow(0 12px 18px #0002);user-select:none;transition:transform .18s}
+          #pet svg,#petImage{width:100%;height:100%;object-fit:contain}
           #bubble{position:absolute;top:4px;max-width:190px;background:#fffdf9;border:1px solid #ddd7ce;border-radius:999px;padding:5px 10px;font-size:12px;opacity:0;transition:.2s;z-index:2}
-          #bubble.show{opacity:1}.happy{animation:bounce .5s ease-in-out}.sleep{animation:float 2s ease-in-out infinite;opacity:.72}.surprised{animation:pop .45s ease}.angry{animation:shake .35s ease}.shy{animation:shy .6s ease}
-          @keyframes bounce{50%{transform:scale(1.1) rotate(-3deg)}} @keyframes pop{50%{transform:scale(1.12)}} @keyframes shake{25%{transform:translateX(-5px)}75%{transform:translateX(5px)}} @keyframes shy{50%{transform:scale(.94) rotate(2deg)}} @keyframes float{50%{transform:translateY(7px) scale(.97)}}
-        </style></head><body><div id="bubble"></div><img id="pet" alt="CharPet">
+          #bubble.show{opacity:1}
+          #pet.action-talk .pet-talk{animation:none}
+          #pet.action-talk .pet-mouth{animation:petTalk .28s ease-in-out infinite alternate}
+          #pet.action-talk .pet-eyes{animation:none}
+          #pet.action-talk .pet-eyes{transform:scaleY(.88);transform-origin:center}
+          #pet.emotion-happy .pet-body{animation:petHappy .7s ease-in-out 2}
+          #pet.emotion-angry .pet-body{animation:petAngry .25s ease-in-out 3}
+          #pet.emotion-surprised .pet-body{animation:petPop .55s ease-out}
+          #pet.emotion-shy .pet-body{animation:petShy .8s ease-in-out}
+          #pet.emotion-sleep .pet-eyes{transform:scaleY(.18);transform-origin:center}
+          @keyframes petTalk{from{transform:scaleY(.55)}to{transform:scaleY(1.18)}}
+          @keyframes petHappy{50%{transform:translateY(-7px) scale(1.08) rotate(-3deg)}}
+          @keyframes petAngry{50%{transform:translateX(5px)}}
+          @keyframes petPop{50%{transform:scale(1.12)}}
+          @keyframes petShy{50%{transform:scale(.94) rotate(2deg)}}
+          .legacy{animation:bounce .5s ease-in-out}.legacy.sleep{animation:float 2s ease-in-out infinite;opacity:.72}
+          @keyframes bounce{50%{transform:scale(1.1) rotate(-3deg)}} @keyframes float{50%{transform:translateY(7px) scale(.97)}}
+        </style></head><body><div id='bubble'></div><div id='pet'>$visual</div>
         <script>
           const pet=document.getElementById('pet'),bubble=document.getElementById('bubble');
-          const image=$image; if(image) pet.src=image; else pet.alt=$name;
-          function render(e){e=e||{};pet.className=e.emotion||'';bubble.textContent=e.text||'';bubble.classList.toggle('show',!!e.text);if(e.action==='talk'||e.action==='tap'||e.action==='wake'){pet.classList.remove('happy');void pet.offsetWidth;pet.classList.add('happy');}if(e.emotion==='sleep'||e.action==='sleep')pet.classList.add('sleep');else pet.classList.remove('sleep');}
+          function render(e){
+            e=e||{}; pet.className='';
+            if(e.action) pet.classList.add('action-'+e.action);
+            if(e.emotion) pet.classList.add('emotion-'+e.emotion);
+            bubble.textContent=e.text||''; bubble.classList.toggle('show',!!e.text);
+            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
+              pet.classList.add('legacy'); setTimeout(()=>pet.classList.remove('legacy'),700);
+            }
+            if(e.emotion==='sleep'||e.action==='sleep') pet.classList.add('emotion-sleep');
+          }
           window.__charpetReceive=render;
           window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
           pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));
           render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
-        """.replace("$image", image).replace("$name", name)
+        """
     }
 
     private fun createChannel() {
