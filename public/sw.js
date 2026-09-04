@@ -1,4 +1,4 @@
-const CACHE = 'charpet-shell-v4';
+const CACHE = 'charpet-shell-v5';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => {
@@ -13,12 +13,16 @@ self.addEventListener('activate', event => {
 
 self.addEventListener('fetch', event => {
   if (event.request.method !== 'GET') return;
+  const url = new URL(event.request.url);
+  const isAppCode = url.origin === self.location.origin && (url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.tsx') || url.pathname === '/sw.js');
+  if (isAppCode) {
+    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
       const copy = response.clone();
-      if (event.request.url.startsWith(self.location.origin)) {
-        caches.open(CACHE).then(cache => cache.put(event.request, copy));
-      }
+      if (event.request.url.startsWith(self.location.origin)) caches.open(CACHE).then(cache => cache.put(event.request, copy));
       return response;
     }).catch(() => caches.match('/')))
   );
