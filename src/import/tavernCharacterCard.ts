@@ -8,17 +8,14 @@ export type TavernCharacterBook = {
   [key: string]: unknown;
 };
 
-/** Only fields CharPet actually needs; the original card payload is not retained. */
+/** Fields imported into CharPet. Greeting/scenario are intentionally ignored; tags are AI-generated later. */
 export type TavernCardImport = {
   format: 'png';
   spec: 'v1' | 'v2' | 'v3';
   name: string;
   description: string;
   personality: string;
-  scenario: string;
-  firstMessage: string;
   messageExamples: string;
-  tags: string[];
   characterBook?: TavernCharacterBook;
 };
 
@@ -59,12 +56,6 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
     ? payload.data as Record<string, unknown>
     : payload;
 
-  const tags = Array.isArray(data.tags)
-    ? data.tags.filter((value): value is string => typeof value === 'string')
-    : typeof data.tags === 'string'
-      ? data.tags.split(',').map(value => value.trim()).filter(Boolean)
-      : [];
-
   const characterBook = data.character_book && typeof data.character_book === 'object'
     ? data.character_book as TavernCharacterBook
     : undefined;
@@ -75,10 +66,7 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
     name: typeof data.name === 'string' ? data.name : '',
     description: typeof data.description === 'string' ? data.description : '',
     personality: typeof data.personality === 'string' ? data.personality : '',
-    scenario: typeof data.scenario === 'string' ? data.scenario : '',
-    firstMessage: typeof data.first_mes === 'string' ? data.first_mes : '',
     messageExamples: typeof data.mes_example === 'string' ? data.mes_example : '',
-    tags,
     characterBook,
   };
 }
@@ -137,9 +125,7 @@ export function summarizeTavernCharacterCard(card: TavernCardImport) {
     spec: card.spec,
     hasDescription: Boolean(card.description),
     hasPersonality: Boolean(card.personality),
-    hasScenario: Boolean(card.scenario),
-    hasFirstMessage: Boolean(card.firstMessage),
-    tagCount: card.tags.length,
+    hasMessageExamples: Boolean(card.messageExamples),
     hasWorldbook: Boolean(card.characterBook),
     worldbookEntryCount: entries.length,
   };
