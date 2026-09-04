@@ -1,23 +1,36 @@
 (()=>{
 const KEY='charpet.pets.v2',NEXT='charpet.nextView.v1',DB='charpet-assets-v1',STORE='blobs';
 const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
-const read=()=>{try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch{return[]}};
-const write=a=>localStorage.setItem(KEY,JSON.stringify(a));
+const read=()=>{try{const a=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(a)?a:[]}catch{return[]}};
+const write=a=>{try{localStorage.setItem(KEY,JSON.stringify(a));return true}catch(e){console.error(e);return false}};
 const uid=()=>crypto.randomUUID();
 function go(p,view){const a=read(),i=a.findIndex(x=>x.id===p.id);if(i>=0){const[x]=a.splice(i,1);a.unshift(x);write(a)}localStorage.setItem(NEXT,JSON.stringify({view}));location.reload()}
 function db(){return new Promise((res,rej)=>{const r=indexedDB.open(DB,1);r.onupgradeneeded=()=>r.result.createObjectStore(STORE);r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
 async function put(file){const d=await db(),k='idb://'+uid();await new Promise((res,rej)=>{const t=d.transaction(STORE,'readwrite');t.objectStore(STORE).put(file,k);t.oncomplete=res;t.onerror=()=>rej(t.error)});d.close();return k}
-function closeModal(){ $$('.modal').forEach(m=>m.remove()) }
+function closeModal(){$$('.modal').forEach(m=>m.remove())}
 function removeRecognizer(){$$('[data-recognize]').forEach(x=>x.remove());$$('button,input[type=button],input[type=submit]').filter(x=>/识别标题/.test(x.textContent||x.value||'')).forEach(x=>x.remove())}
 function bindCards(){
  $$('.charCard').forEach(card=>{
   if(card.dataset.fix7)return;card.dataset.fix7='1';
   const p=read().find(x=>x.id===card.dataset.char);if(!p)return;
+  const states=new WeakMap();
+  const arm=el=>{
+   let s=states.get(el);if(s?.timer)clearTimeout(s.timer);
+   s={held:false,timer:setTimeout(()=>{s.held=true},650)};states.set(el,s);
+  };
+  const disarm=el=>{const s=states.get(el);if(!s)return;if(s.timer)clearTimeout(s.timer);states.set(el,s)};
+  const wasHeld=el=>{const s=states.get(el);if(!s?.held)return false;states.delete(el);return true};
+  const av=$('img',card),meta=$('.charMeta',card);
+  [av,meta].filter(Boolean).forEach(el=>{
+   el.addEventListener('pointerdown',e=>{if(document.body.classList.contains('cpManageOn'))return;arm(el)},true);
+   ['pointerup','pointercancel','pointerleave'].forEach(t=>el.addEventListener(t,()=>disarm(el),true));
+  });
   card.addEventListener('click',e=>{
    if(document.body.classList.contains('cpManageOn'))return;
    const av=e.target.closest('img');
-   if(av){e.preventDefault();e.stopPropagation();go(p,'角色资料');return}
-   if(e.target.closest('.charMeta')){e.preventDefault();e.stopPropagation();go(p,'小窝');return}
+   if(av){if(wasHeld(av)){e.preventDefault();e.stopImmediatePropagation();return}e.preventDefault();e.stopPropagation();go(p,'角色资料');return}
+   const meta=e.target.closest('.charMeta');
+   if(meta){if(wasHeld(meta)){e.preventDefault();e.stopImmediatePropagation();return}e.preventDefault();e.stopPropagation();go(p,'小窝');return}
   },true);
  });
 }
