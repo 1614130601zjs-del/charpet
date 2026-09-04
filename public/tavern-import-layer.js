@@ -4,11 +4,17 @@
 
   const esc = (s) => String(s ?? '').replace(/[&<>\"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '\"':'&quot;' }[c]));
   const text = (v) => typeof v === 'string' ? v.trim() : '';
-  const timelineTitle = (title) => /(线|期|后|前|年|岁|童年|少年|青年|成年|晚年|幼年|过去|现在|未来|初期|中期|后期|阶段|时期|day|night|morning|childhood|teen|adult|future|past|phase|period)/i.test(title.trim());
 
-  function decodeBytes(bytes) {
-    return new TextDecoder('utf-8').decode(bytes);
-  }
+  // Timeline = age / life stage / time period / life line.
+  // Relationship-only labels are kept out unless the title itself clearly denotes a line/phase.
+  const timelineTitle = (title) => {
+    const t = text(title).toLowerCase();
+    if (!t) return false;
+    if (/^(人妻|恋人|情侣|伴侣|朋友|家人|主从|同事|已婚|未婚|单身|前任|丈夫|妻子|男友|女友)$/i.test(t)) return false;
+    return /(男高|女高|高中|男大|女大|大学|大学生|童年|幼年|少年|青年|成年|晚年|学生时代|学生时期|工作后|毕业后|婚后|婚前|五年后|十年后|多年后|过去|现在|未来|初期|中期|后期|阶段|时期|时间线|人生线|年龄|\d+\s*(岁|年级|年后|年前)|\d+\s*years?|\b(day|night|morning|childhood|teen|teenage|adult|future|past|phase|period)\b|\b(high school|college|university)\b)/i.test(t);
+  };
+
+  function decodeBytes(bytes) { return new TextDecoder('utf-8').decode(bytes); }
 
   function decodeCardValue(value) {
     const raw = text(value);
@@ -61,7 +67,6 @@
         if (nul.length >= 3) {
           const key = decodeBytes(b.slice(0, nul[0]));
           const compressionFlag = b[nul[0]+1];
-          const languageEnd = nul[1];
           const translatedEnd = nul[2];
           let start = translatedEnd + 1;
           if (compressionFlag === 0) values.push({ key, value: decodeBytes(b.slice(start)) });
@@ -87,16 +92,21 @@
       scenario: text(root.scenario),
       firstMessage: text(root.first_mes || root.firstMessage),
       messageExamples: Array.isArray(root.mes_example || root.messageExamples) ? (root.mes_example || root.messageExamples) : [],
-      worldbook: entries.map((e, i) => ({
-        id: `wb-${Date.now()}-${i}`,
-        title: text(e.name || e.title || (Array.isArray(e.keys) ? e.keys.join(', ') : '世界书条目')) || `世界书 ${i + 1}`,
-        content: text(e.content),
-        enabled: e.enabled !== false,
-        isTimeline: timelineTitle(text(e.name || e.title || (Array.isArray(e.keys) ? e.keys.join(', ') : '')))
-      }))
+      worldbook: entries.map((e, i) => {
+        const title = text(e.name || e.title || (Array.isArray(e.keys) ? e.keys.join(', ') : '世界书条目')) || `世界书 ${i + 1}`;
+        return {
+          id: `wb-${Date.now()}-${i}`,
+          title,
+          content: text(e.content),
+          enabled: e.enabled !== false,
+          isTimeline: timelineTitle(title)
+        };
+      })
     };
   }
 
+  // Tavern's separate scenario/personality/examples/opening fields are deliberately
+  // flattened into one editable role description in CharPet.
   function unifiedDescription(card) {
     const parts = [];
     if (card.description) parts.push(`【角色描述】\n${card.description}`);
@@ -136,7 +146,7 @@
     document.getElementById('charpet-tavern-import-overlay')?.remove();
     let parsed = null, image = '', relationship = '主人', timelineEnabled = true;
     const overlay = document.createElement('div'); overlay.id='charpet-tavern-import-overlay'; overlay.className='charpetImportOverlay';
-    overlay.innerHTML = `<div class="charpetImportCard"><div class="charpetImportHead"><div><span class="eyebrow">TAVERN IMPORT</span><h2>导入酒馆卡</h2><p class="charpetImportHint">PNG 读取后会生成一个独立 CHAR。角色描述统一保存；世界书按标题识别时间线，默认开启。</p></div><button class="charpetImportClose">×</button></div><label class="charpetImportDrop">📦 选择酒馆 PNG 角色卡<input id="charpetImportFile" hidden type="file" accept="image/png,.png" /></label><div id="charpetImportResult"></div><div class="charpetImportActions"><button id="charpetImportCancel">取消</button><button id="charpetImportConfirm" class="primary" disabled>读取并生成 CHAR</button></div></div>`;
+    overlay.innerHTML = `<div class="charpetImportCard"><div class="charpetImportHead"><div><span class="eyebrow">TAVERN IMPORT</span><h2>导入酒馆卡</h2><p class="charpetImportHint">PNG 读取后会生成一个独立 CHAR。角色描述统一保存；世界书只按标题识别年龄/人生阶段时间线，关系单独保存，默认开启。</p></div><button class="charpetImportClose">×</button></div><label class="charpetImportDrop">📦 选择酒馆 PNG 角色卡<input id="charpetImportFile" hidden type="file" accept="image/png,.png" /></label><div id="charpetImportResult"></div><div class="charpetImportActions"><button id="charpetImportCancel">取消</button><button id="charpetImportConfirm" class="primary" disabled>读取并生成 CHAR</button></div></div>`;
     document.body.appendChild(overlay);
     const fileInput = overlay.querySelector('#charpetImportFile');
     const result = overlay.querySelector('#charpetImportResult');
@@ -149,7 +159,7 @@
       try {
         const buffer = await file.arrayBuffer(); parsed = parseTavernPng(buffer);
         image = await new Promise((resolve, reject) => { const r=new FileReader(); r.onload=()=>resolve(String(r.result)); r.onerror=reject; r.readAsDataURL(file); });
-        result.innerHTML = `<div class="charpetImportPreview"><h3>${esc(parsed.name)}</h3><div><span class="charpetImportBadge">世界书 ${parsed.worldbook.length} 条</span><span class="charpetImportBadge">时间线候选 ${parsed.worldbook.filter(x=>x.isTimeline).length} 条</span></div><pre>${esc(unifiedDescription(parsed).slice(0,900))}${unifiedDescription(parsed).length>900?'\n…':''}</pre><div class="charpetImportGrid"><label>你和 TA 的关系<input id="charpetImportRelationship" value="主人" /></label><label>时间线识别<input id="charpetImportTimeline" type="checkbox" checked style="width:20px;height:20px" /></label></div><p class="charpetImportHint">时间线识别只检查世界书条目标题，不读取正文判断是否为时间线。</p></div>`;
+        result.innerHTML = `<div class="charpetImportPreview"><h3>${esc(parsed.name)}</h3><div><span class="charpetImportBadge">世界书 ${parsed.worldbook.length} 条</span><span class="charpetImportBadge">时间线候选 ${parsed.worldbook.filter(x=>x.isTimeline).length} 条</span></div><pre>${esc(unifiedDescription(parsed).slice(0,900))}${unifiedDescription(parsed).length>900?'\n…':''}</pre><div class="charpetImportGrid"><label>你和 TA 的关系<input id="charpetImportRelationship" value="主人" /></label><label>时间线识别<input id="charpetImportTimeline" type="checkbox" checked style="width:20px;height:20px" /></label></div><p class="charpetImportHint">只检查世界书条目标题，不读取正文；男高、男大等人生阶段可以被识别为时间线，单独的关系词不会被误判。</p></div>`;
         confirm.disabled = false;
         overlay.querySelector('#charpetImportRelationship').oninput = e => relationship = e.target.value || '主人';
         overlay.querySelector('#charpetImportTimeline').onchange = e => timelineEnabled = e.target.checked;
@@ -162,13 +172,14 @@
       if (!parsed) return;
       const now = Date.now();
       const worldbook = parsed.worldbook.map(x => ({ ...x, isTimeline: timelineEnabled && !!x.isTimeline }));
+      const timelineCandidates = worldbook.filter(x => x.isTimeline).map(x => x.title);
       const pet = {
         id: crypto.randomUUID(), name: parsed.name, image, source: 'upload', createdAt: now,
         assets: { avatar: image, idle: image }, userTitle: relationship,
         card: { templateId: 'classic', accentColor: '#b68cff', nickname: relationship },
         profile: { description: unifiedDescription(parsed), syncedAt: now },
         worldbook, relationship: [{ key:'relationship', label:'关系', value:0, min:0, max:100 }],
-        era: worldbook.find(x => x.isTimeline)?.title || '', timeline: [], diary: [], memories: [], homeActivities: [],
+        era: timelineCandidates[0] || '', timeline: [], diary: [], memories: [], homeActivities: [],
         needs: { hunger:70, energy:80, mood:70 }, stats: { interactions:0, affection:0, lastSeenAt:now }
       };
       savePets([pet, ...getPets()]);
