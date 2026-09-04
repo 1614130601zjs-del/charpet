@@ -11,6 +11,14 @@
 - MCP：本地 MCP + HTTPS `/mcp` 接入
 - Render：支持一键部署 Web Studio
 
+## 🚀 一键部署到 Render
+
+<a href="https://render.com/deploy?repo=https://github.com/1614130601zjs-del/charpet">
+  <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" />
+</a>
+
+点上面的紫色 **Deploy to Render**，Render 会读取仓库里的 `render.yaml`，直接创建 Web Studio。
+
 ## 目标架构
 
 ```text
@@ -33,9 +41,9 @@
 
 核心原则：MCP 传“语义状态”，不传逐帧动画。身体负责把 `happy / sad / talk / idle` 等状态转换成动画；桌宠自己的移动和待机行为不依赖 MCP。
 
-## 一键部署 Render
+## Render 部署说明
 
-仓库已经包含 `render.yaml`。在 Render 中选择 **New → Blueprint**，连接这个 GitHub 仓库即可按配置创建 Web Studio。
+仓库已经包含 `render.yaml`。上面的官方按钮会直接进入 Render 的 Blueprint 部署流程。
 
 部署后的 Web Studio 是静态站点，不需要数据库或账号；角色数据继续保存在浏览器本地。
 
