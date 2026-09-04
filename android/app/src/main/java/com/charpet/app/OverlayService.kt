@@ -30,10 +30,10 @@ class OverlayService : Service() {
         const val ACTION_EVENT = "com.charpet.app.ACTION_EVENT"
         const val EXTRA_EVENT_JSON = "com.charpet.app.EXTRA_EVENT_JSON"
         const val ACTION_STOP = "com.charpet.app.ACTION_STOP"
-        const val ACTION_RELAY_START = "com.charpet.app.ACTION_RELAY_START"
-        const val ACTION_RELAY_STOP = "com.charpet.app.ACTION_RELAY_STOP"
-        const val EXTRA_RELAY_URL = "com.charpet.app.EXTRA_RELAY_URL"
-        const val EXTRA_RELAY_TOKEN = "com.charpet.app.EXTRA_RELAY_TOKEN"
+        const val ACTION_MCP_START = "com.charpet.app.ACTION_MCP_START"
+        const val ACTION_MCP_STOP = "com.charpet.app.ACTION_MCP_STOP"
+        const val EXTRA_MCP_URL = "com.charpet.app.EXTRA_MCP_URL"
+        const val EXTRA_MCP_TOKEN = "com.charpet.app.EXTRA_MCP_TOKEN"
         private const val CHANNEL_ID = "charpet_overlay"
         private const val NOTIFICATION_ID = 1001
         private const val ORIGIN = "https://charpet.local"
@@ -41,8 +41,8 @@ class OverlayService : Service() {
         private const val PREFS = "charpet_overlay"
         private const val KEY_X = "x"
         private const val KEY_Y = "y"
-        private const val KEY_RELAY_URL = "relay_url"
-        private const val KEY_RELAY_TOKEN = "relay_token"
+        private const val KEY_MCP_URL = "mcp_url"
+        private const val KEY_MCP_TOKEN = "mcp_token"
     }
 
     private lateinit var windowManager: WindowManager
@@ -52,7 +52,7 @@ class OverlayService : Service() {
     private var webPort: WebMessagePort? = null
     private var userDragging = false
     private var autonomous: AutonomousPetRuntime? = null
-    private var relay: RelayClient? = null
+    private var mcp: McpStreamableHttpClient? = null
     private val mainHandler = Handler(Looper.getMainLooper())
     private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
 
@@ -77,14 +77,14 @@ class OverlayService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            ACTION_RELAY_STOP -> {
-                stopRelay()
+            ACTION_MCP_STOP -> {
+                stopMcp()
                 return START_STICKY
             }
-            ACTION_RELAY_START -> {
-                startRelay(
-                    intent.getStringExtra(EXTRA_RELAY_URL) ?: prefs.getString(KEY_RELAY_URL, "http://127.0.0.1:8787")!!,
-                    intent.getStringExtra(EXTRA_RELAY_TOKEN) ?: prefs.getString(KEY_RELAY_TOKEN, "")!!,
+            ACTION_MCP_START -> {
+                startMcp(
+                    intent.getStringExtra(EXTRA_MCP_URL) ?: prefs.getString(KEY_MCP_URL, "") ?: "",
+                    intent.getStringExtra(EXTRA_MCP_TOKEN) ?: prefs.getString(KEY_MCP_TOKEN, "") ?: "",
                 )
             }
         }
@@ -131,26 +131,26 @@ class OverlayService : Service() {
         if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
         startAutonomousRuntime(size)
-        val relayUrl = prefs.getString(KEY_RELAY_URL, "") ?: ""
-        if (relayUrl.isNotBlank()) startRelay(relayUrl, prefs.getString(KEY_RELAY_TOKEN, "") ?: "")
+        val mcpUrl = prefs.getString(KEY_MCP_URL, "") ?: ""
+        if (mcpUrl.isNotBlank()) startMcp(mcpUrl, prefs.getString(KEY_MCP_TOKEN, "") ?: "")
     }
 
-    private fun startRelay(baseUrl: String, token: String) {
-        prefs.edit().putString(KEY_RELAY_URL, baseUrl.trimEnd('/')).putString(KEY_RELAY_TOKEN, token).apply()
-        relay?.destroy()
-        relay = RelayClient(mainHandler).also { client ->
-            client.onEvent = { event -> sendEventToWeb(event.toJson()) }
-            client.onStatus = { status ->
-                // Keep status out of the pet event stream; the foreground service remains usable offline.
-                android.util.Log.d("CharPetRelay", status)
+    private fun startMcp(endpoint: String, token: String) {
+        if (endpoint.isBlank()) return
+        runCatching {
+            prefs.edit().putString(KEY_MCP_URL, endpoint.trimEnd('/')).putString(KEY_MCP_TOKEN, token).apply()
+            mcp?.destroy()
+            mcp = McpStreamableHttpClient(mainHandler).also { client ->
+                client.onEvent = { event -> sendEventToWeb(event.toJson()) }
+                client.onStatus = { status -> android.util.Log.d("CharPetMcp", status) }
+                client.start(endpoint, token.ifBlank { null })
             }
-            client.start(baseUrl, token.ifBlank { null })
-        }
+        }.onFailure { error -> android.util.Log.e("CharPetMcp", "Invalid MCP endpoint", error) }
     }
 
-    private fun stopRelay() {
-        relay?.destroy()
-        relay = null
+    private fun stopMcp() {
+        mcp?.destroy()
+        mcp = null
     }
 
     private fun startAutonomousRuntime(petSize: Int) {
@@ -279,7 +279,7 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         autonomous?.stop(); autonomous = null
-        relay?.destroy(); relay = null
+        mcp?.destroy(); mcp = null
         webPort?.close(); overlay?.let { windowManager.removeView(it) }; webView?.destroy()
         overlay = null; webView = null; webPort = null
         super.onDestroy()
