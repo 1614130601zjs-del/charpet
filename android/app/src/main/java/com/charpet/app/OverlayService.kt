@@ -115,10 +115,10 @@ class OverlayService : Service() {
         val metrics = resources.displayMetrics
         autonomous?.stop()
         autonomous = AutonomousPetRuntime().also { runtime ->
-            runtime.onMove = { move ->
-                if (userDragging) return@let
-                val lp = params ?: return@let
-                val root = overlay ?: return@let
+            runtime.onMove = move@{ move ->
+                if (userDragging) return@move
+                val lp = params ?: return@move
+                val root = overlay ?: return@move
                 lp.x = move.x
                 lp.y = move.y
                 windowManager.updateViewLayout(root, lp)
