@@ -27,10 +27,14 @@ class OverlayService : Service() {
     companion object {
         const val ACTION_EVENT = "com.charpet.app.ACTION_EVENT"
         const val EXTRA_EVENT_JSON = "com.charpet.app.EXTRA_EVENT_JSON"
+        const val ACTION_STOP = "com.charpet.app.ACTION_STOP"
         private const val CHANNEL_ID = "charpet_overlay"
         private const val NOTIFICATION_ID = 1001
         private const val ORIGIN = "https://charpet.local"
         private const val BRIDGE_NAME = "charPetBridge"
+        private const val PREFS = "charpet_overlay"
+        private const val KEY_X = "x"
+        private const val KEY_Y = "y"
     }
 
     private lateinit var windowManager: WindowManager
@@ -55,6 +59,10 @@ class OverlayService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (!Settings.canDrawOverlays(this)) return START_NOT_STICKY
         if (overlay == null) showOverlay()
         intent?.getStringExtra(EXTRA_EVENT_JSON)?.let { sendEventToWeb(it) }
@@ -80,7 +88,9 @@ class OverlayService : Service() {
             }
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        installDrag(root)
+        val saved = getSharedPreferences(PREFS, MODE_PRIVATE)
+        val defaultX = (24 * density).toInt()
+        val defaultY = (160 * density).toInt()
         val lp = WindowManager.LayoutParams(
             size, size,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -88,13 +98,14 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = (24 * density).toInt()
-            y = (160 * density).toInt()
+            x = saved.getInt(KEY_X, defaultX)
+            y = saved.getInt(KEY_Y, defaultY)
         }
         windowManager.addView(root, lp)
         overlay = root
         webView = view
         params = lp
+        installDrag(root)
         if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
     }
@@ -117,9 +128,12 @@ class OverlayService : Service() {
                 ) {
                     if (!isMainFrame || sourceOrigin.toString() != ORIGIN) return
                     val payload = message.data ?: return
+                    if (payload == "{\"type\":\"charpet.ready\"}") {
+                        replyProxy.postMessage("{\"type\":\"charpet.ack\"}")
+                        return
+                    }
                     if (isValidPetEvent(payload)) {
-                        // Native is the event source here; do not echo web-originated events back.
-                        replyProxy.postMessage(JSONObject.quote("ok"))
+                        replyProxy.postMessage("{\"type\":\"charpet.accepted\"}")
                     }
                 }
             }
@@ -130,11 +144,9 @@ class OverlayService : Service() {
         return runCatching {
             val event = JSONObject(json)
             if (event.optString("type") != "charpet.event") return false
-            val action = event.optString("action")
             val allowedActions = setOf("idle", "talk", "tap", "drag", "sleep", "wake")
-            if (action !in allowedActions) return false
-            val intensity = event.optDouble("intensity", 1.0)
-            intensity in 0.0..1.0
+            if (event.optString("action") !in allowedActions) return false
+            event.optDouble("intensity", 1.0) in 0.0..1.0
         }.getOrDefault(false)
     }
 
@@ -151,10 +163,20 @@ class OverlayService : Service() {
                     if (dragging) { lp.x = startX + dx.toInt(); lp.y = startY + dy.toInt(); windowManager.updateViewLayout(root, lp) }
                     dragging
                 }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> dragging
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (dragging) savePosition(lp)
+                    dragging
+                }
                 else -> false
             }
         }
+    }
+
+    private fun savePosition(lp: WindowManager.LayoutParams) {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+            .putInt(KEY_X, lp.x)
+            .putInt(KEY_Y, lp.y)
+            .apply()
     }
 
     private fun sendEventToWeb(json: String) {
@@ -173,7 +195,7 @@ class OverlayService : Service() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
                 val payload = message.data ?: return
                 if (isValidPetEvent(payload)) {
-                    // Legacy channel is receive-only for now; avoid creating an event echo loop.
+                    // Legacy channel is receive-only; native producers remain the event authority.
                 }
             }
         })
@@ -182,7 +204,6 @@ class OverlayService : Service() {
 
     private fun html(): String {
         val pet = CharPetStore(this).load()
-        val name = JSONObject.quote(pet?.optString("name", "我的 Char") ?: "我的 Char")
         val inlineSvg = pet?.let { CharPetRenderer.inlineSvgFor(it) }
         val customImage = pet?.let { CharPetRenderer.imageFor(it) }
         val visual = if (inlineSvg != null) inlineSvg else {
@@ -226,9 +247,9 @@ class OverlayService : Service() {
             const body=svg?.querySelector('.pet-body');
             const eyes=svg?.querySelector('.pet-eyes');
             const mouth=svg?.querySelector('.pet-mouth');
-            if(body){ body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:''); }
+            if(body) body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:'');
             if(eyes){ eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep'); eyes.classList.toggle('pet-talk',e.action==='talk'); }
-            if(mouth){ mouth.classList.toggle('pet-talk',e.action==='talk'); }
+            if(mouth) mouth.classList.toggle('pet-talk',e.action==='talk');
             bubble.textContent=e.text||'';
             bubble.classList.toggle('show',!!e.text);
             if(e.action==='talk'||e.action==='tap'||e.action==='wake'){ pet.classList.add('legacy'); setTimeout(()=>pet.classList.remove('legacy'),700); }
@@ -254,9 +275,9 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         webPort?.close()
-        overlay?.let { windowManager.removeView(it) }
+        overlay?.let { if (::windowManager.isInitialized) windowManager.removeView(it) }
         webView?.destroy()
-        overlay = null; webView = null; webPort = null
+        overlay = null; webView = null; webPort = null; params = null
         super.onDestroy()
     }
 
