@@ -171,14 +171,28 @@ class OverlayService : Service() {
         <script>
           const pet=document.getElementById('pet'),bubble=document.getElementById('bubble');
           function render(e){
-            e=e||{}; pet.className='';
+            e=e||{};
+            pet.className='';
             if(e.action) pet.classList.add('action-'+e.action);
             if(e.emotion) pet.classList.add('emotion-'+e.emotion);
-            bubble.textContent=e.text||''; bubble.classList.toggle('show',!!e.text);
-            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
-              pet.classList.add('legacy'); setTimeout(()=>pet.classList.remove('legacy'),700);
+            const svg=pet.querySelector('svg');
+            const body=svg?.querySelector('.pet-body');
+            const eyes=svg?.querySelector('.pet-eyes');
+            const mouth=svg?.querySelector('.pet-mouth');
+            if(body){
+              body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:'');
             }
-            if(e.emotion==='sleep'||e.action==='sleep') pet.classList.add('emotion-sleep');
+            if(eyes){
+              eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep');
+              eyes.classList.toggle('pet-talk',e.action==='talk');
+            }
+            if(mouth){ mouth.classList.toggle('pet-talk',e.action==='talk'); }
+            bubble.textContent=e.text||'';
+            bubble.classList.toggle('show',!!e.text);
+            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
+              pet.classList.add('legacy');
+              setTimeout(()=>pet.classList.remove('legacy'),700);
+            }
           }
           window.__charpetReceive=render;
           window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
