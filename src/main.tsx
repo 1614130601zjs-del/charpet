@@ -4,6 +4,8 @@ import './style.css';
 import type { PetAction, PetMood, PetRecord } from './pet/petTypes';
 import { applyPetEvent, nextIdleState, type PetState } from './pet/petRuntime';
 import { createPetEvent, dispatchPetEvent, subscribePetEvents } from './bridge/semanticEvents';
+import { listenForMcpMessages } from './bridge/mcpBridge';
+import { appendPetEventLog } from './bridge/eventLog';
 import { getPetMotion, motionScale } from './pet/petRenderer';
 import { NativeCreator, type CreatorState } from './creator/NativeCreator';
 import { loadPetRecords, savePetRecords, touchPetRecord } from './storage/petStore';
@@ -41,7 +43,11 @@ function App() {
   function clearTimers() { if (idleTimer.current) window.clearTimeout(idleTimer.current); if (sleepTimer.current) window.clearTimeout(sleepTimer.current); idleTimer.current = null; sleepTimer.current = null; }
   function armTimers() { clearTimers(); idleTimer.current = window.setTimeout(() => setPetState(s => s.isSleeping ? s : nextIdleState(s)), 1200); sleepTimer.current = window.setTimeout(() => emit('sleep', 'sleep', 0.3, randomLine('sleep')), 18000); }
 
-  useEffect(() => subscribePetEvents(event => { setPetState(s => applyPetEvent(s, event)); if (event.action === 'sleep') clearTimers(); else armTimers(); }), []);
+  useEffect(() => {
+    const stopEvents = subscribePetEvents(event => { appendPetEventLog(event); setPetState(s => applyPetEvent(s, event)); if (event.action === 'sleep') clearTimers(); else armTimers(); });
+    const stopMcp = listenForMcpMessages();
+    return () => { stopEvents(); stopMcp(); };
+  }, []);
   useEffect(() => { armTimers(); return clearTimers; }, [selectedPet?.id]);
 
   function upload(file?: File) {
@@ -68,7 +74,7 @@ function App() {
   function endDrag() { if (drag.active) emit('idle', 'idle', 0.35); setDrag(d => ({ ...d, active: false })); }
 
   return <main className="app">
-    <header><div><span className="eyebrow">CHARPET STUDIO · V0.8</span><h1>养一只属于你的 Char</h1><p>独立运行、可以捏，也可以直接把自己的角色带进来。</p></div><div className="headerActions"><button className="creatorTop" onClick={() => openCreator()}>✦ 捏一个 Char</button><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => upload(e.target.files?.[0])} /></label></div></header>
+    <header><div><span className="eyebrow">CHARPET STUDIO · V0.9</span><h1>养一只属于你的 Char</h1><p>独立运行、可以捏，也可以直接把自己的角色带进来。</p></div><div className="headerActions"><button className="creatorTop" onClick={() => openCreator()}>✦ 捏一个 Char</button><label className="uploadTop">＋ 上传角色<input hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={e => upload(e.target.files?.[0])} /></label></div></header>
     <section className="hero"><div className="petStage"><div className={`petBubble ${petState.emotion}`}>{petState.speech}</div>{selectedPet ? <img src={selectedPet.image} className={`pet ${motion.className}`} style={{ transform: `translate(${petOffset.x}px,${petOffset.y}px)`, scale: motionScale(petState) }} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag} onClick={interact} draggable={false} alt={selectedPet.name} /> : <div className="placeholder"><div>🐾</div><span>选择一个角色开始</span></div>}</div>
       <div className="panel"><span className="eyebrow">MY PET</span><h2>{selectedPet?.name || '还没有角色'}</h2><p>{selectedPet ? `状态：${petState.isSleeping ? 'sleeping' : petState.emotion} · ${petState.action}。它会自己待机，安静一会儿还会睡觉。` : '你可以直接上传 PNG / JPG / WebP，或者用本地捏人器。'}</p>
         {selectedPet && <><div className="petStats"><span>陪伴值 <strong>{stats.affection}</strong>/100</span><span>互动 <strong>{stats.interactions}</strong> 次</span></div><div className="panelActions"><button onClick={interact}>逗一下</button><button onClick={talk}>说句话</button><button onClick={() => mood('shy')}>摸摸它</button><button onClick={() => emit('sleep', 'sleep', 0.3, randomLine('sleep'))}>让它睡</button><button onClick={() => emit('wake', 'happy', 0.8, '早上好！')}>叫醒</button>{selectedPet.source === 'creator' && <button onClick={() => openCreator(selectedPet)}>重新捏</button>}<button onClick={() => { clearTimers(); setSelected(null); setPetOffset({ x: 0, y: 0 }); setPetState(s => nextIdleState(s)); }}>返回角色库</button></div><div className="moodRow"><button onClick={() => mood('happy')}>开心</button><button onClick={() => mood('sad')}>低落</button><button onClick={() => mood('angry')}>生气</button></div></>}
