@@ -16,6 +16,7 @@ export type TavernCardImport = {
   personality: string;
   messageExamples: string;
   firstMessage?: string;
+  scenario?: string;
   characterBook?: TavernCharacterBook;
 };
 
@@ -54,7 +55,6 @@ function readTextChunk(type: string, data: Uint8Array): { key: string; value: st
     return { key: ascii(data.subarray(0, split)), value: ascii(data.subarray(split + 1)) };
   }
   if (type === 'iTXt') {
-    // keyword\0 compressionFlag compressionMethod languageTag\0 translatedKeyword\0 text
     let p = data.indexOf(0);
     if (p < 0 || p + 2 >= data.length) return null;
     const key = utf8(data.subarray(0, p));
@@ -69,6 +69,19 @@ function readTextChunk(type: string, data: Uint8Array): { key: string; value: st
   return null;
 }
 
+/**
+ * A timeline is an age/life-stage/time-line concept, not a relationship label.
+ * Title-only detection deliberately recognizes common life-stage names such as 男高/男大,
+ * while relationship-only words such as 人妻 are not automatically treated as timelines.
+ */
+export function looksLikeTimelineTitle(title: string): boolean {
+  const t = title.trim().toLowerCase();
+  if (!t) return false;
+  const relationshipOnly = /^(人妻|恋人|情侣|伴侣|朋友|家人|主从|同事|已婚|未婚|单身|前任|丈夫|妻子|男友|女友)$/i;
+  if (relationshipOnly.test(t)) return false;
+  return /(男高|女高|高中|男大|女大|大学|大学生|童年|幼年|少年|青年|成年|晚年|学生时代|学生时期|工作后|毕业后|婚后|婚前|五年后|十年后|多年后|过去|现在|未来|初期|中期|后期|阶段|时期|时间线|人生线|年龄|\d+\s*(岁|年级|年后|年前)|\d+\s*years?|\b(day|night|morning|childhood|teen|teenage|adult|future|past|phase|period)\b|\b(high school|college|university)\b)/i.test(t);
+}
+
 function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3'): TavernCardImport {
   const data = payload.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : payload;
   const characterBook = data.character_book && typeof data.character_book === 'object' ? data.character_book as TavernCharacterBook : undefined;
@@ -79,6 +92,7 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
     personality: typeof data.personality === 'string' ? data.personality : '',
     messageExamples: typeof data.mes_example === 'string' ? data.mes_example : '',
     firstMessage: typeof data.first_mes === 'string' ? data.first_mes : undefined,
+    scenario: typeof data.scenario === 'string' ? data.scenario : undefined,
     characterBook,
   };
 }
@@ -122,10 +136,15 @@ export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): Tave
 
 export function summarizeTavernCharacterCard(card: TavernCardImport) {
   const entries = Array.isArray(card.characterBook?.entries) ? card.characterBook.entries : [];
+  const timelineEntries = entries.filter(entry => {
+    const title = typeof entry.name === 'string' ? entry.name : typeof entry.title === 'string' ? entry.title : '';
+    return looksLikeTimelineTitle(title);
+  });
   return {
     name: card.name, spec: card.spec,
     hasDescription: Boolean(card.description), hasPersonality: Boolean(card.personality),
     hasMessageExamples: Boolean(card.messageExamples), hasFirstMessage: Boolean(card.firstMessage),
     hasWorldbook: Boolean(card.characterBook), worldbookEntryCount: entries.length,
+    timelineEntryCount: timelineEntries.length,
   };
 }
