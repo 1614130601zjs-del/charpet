@@ -31,6 +31,7 @@ export type CharCardPreferences = {
   tags?: string[];
   signature?: string;
   templateId?: string;
+  customCss?: string;
   accentColor?: string;
 };
 
