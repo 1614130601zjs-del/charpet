@@ -8,7 +8,7 @@ export type TavernCharacterBook = {
   [key: string]: unknown;
 };
 
-/** Fields imported into CharPet. Greeting/scenario are intentionally ignored; tags are AI-generated later. */
+/** Normalized data used when creating a CharPet character from a Tavern card. */
 export type TavernCardImport = {
   format: 'png';
   spec: 'v1' | 'v2' | 'v3';
@@ -16,23 +16,17 @@ export type TavernCardImport = {
   description: string;
   personality: string;
   messageExamples: string;
+  /** Kept so CharPet does not lose the Tavern opening message during import. */
+  firstMessage?: string;
   characterBook?: TavernCharacterBook;
 };
 
 const PNG_SIGNATURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
 const MAX_CARD_BYTES = 20 * 1024 * 1024;
 
-function ascii(bytes: Uint8Array): string {
-  return new TextDecoder('latin1').decode(bytes);
-}
-
-function utf8(bytes: Uint8Array): string {
-  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
-}
-
-function readU32(bytes: Uint8Array, offset: number): number {
-  return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0);
-}
+function ascii(bytes: Uint8Array): string { return new TextDecoder('latin1').decode(bytes); }
+function utf8(bytes: Uint8Array): string { return new TextDecoder('utf-8', { fatal: false }).decode(bytes); }
+function readU32(bytes: Uint8Array, offset: number): number { return new DataView(bytes.buffer, bytes.byteOffset + offset, 4).getUint32(0); }
 
 function decodeBase64(value: string): Uint8Array {
   const binary = atob(value.replace(/\s+/g, ''));
@@ -43,23 +37,14 @@ function decodeBase64(value: string): Uint8Array {
 
 function decodePayload(value: string): Record<string, unknown> | null {
   try {
-    const text = utf8(decodeBase64(value));
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(utf8(decodeBase64(value)));
     return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
 function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3'): TavernCardImport {
-  const data = payload.data && typeof payload.data === 'object'
-    ? payload.data as Record<string, unknown>
-    : payload;
-
-  const characterBook = data.character_book && typeof data.character_book === 'object'
-    ? data.character_book as TavernCharacterBook
-    : undefined;
-
+  const data = payload.data && typeof payload.data === 'object' ? payload.data as Record<string, unknown> : payload;
+  const characterBook = data.character_book && typeof data.character_book === 'object' ? data.character_book as TavernCharacterBook : undefined;
   return {
     format: 'png',
     spec,
@@ -67,6 +52,7 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
     description: typeof data.description === 'string' ? data.description : '',
     personality: typeof data.personality === 'string' ? data.personality : '',
     messageExamples: typeof data.mes_example === 'string' ? data.mes_example : '',
+    firstMessage: typeof data.first_mes === 'string' ? data.first_mes : undefined,
     characterBook,
   };
 }
@@ -75,9 +61,7 @@ function normalizeCard(payload: Record<string, unknown>, spec: 'v1' | 'v2' | 'v3
 export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): TavernCardImport {
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   if (bytes.byteLength > MAX_CARD_BYTES) throw new Error('Character card is too large');
-  if (bytes.byteLength < 8 || !PNG_SIGNATURE.every((value, index) => bytes[index] === value)) {
-    throw new Error('Not a PNG character card');
-  }
+  if (bytes.byteLength < 8 || !PNG_SIGNATURE.every((value, index) => bytes[index] === value)) throw new Error('Not a PNG character card');
 
   let offset = 8;
   let v3: Record<string, unknown> | null = null;
@@ -91,7 +75,6 @@ export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): Tave
     const dataEnd = dataStart + length;
     if (dataEnd + 4 > bytes.length) break;
     const data = bytes.subarray(dataStart, dataEnd);
-
     if (type === 'tEXt') {
       const split = data.indexOf(0);
       if (split >= 0) {
@@ -107,7 +90,6 @@ export function parseTavernCharacterCard(buffer: ArrayBuffer | Uint8Array): Tave
         }
       }
     }
-
     offset = dataEnd + 4;
     if (type === 'IEND') break;
   }
@@ -126,6 +108,7 @@ export function summarizeTavernCharacterCard(card: TavernCardImport) {
     hasDescription: Boolean(card.description),
     hasPersonality: Boolean(card.personality),
     hasMessageExamples: Boolean(card.messageExamples),
+    hasFirstMessage: Boolean(card.firstMessage),
     hasWorldbook: Boolean(card.characterBook),
     worldbookEntryCount: entries.length,
   };
