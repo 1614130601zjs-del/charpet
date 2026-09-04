@@ -1,4 +1,4 @@
-const CACHE = 'charpet-shell-v2';
+const CACHE = 'charpet-shell-v3';
 const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
 
 self.addEventListener('install', event => {
