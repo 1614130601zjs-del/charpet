@@ -1,29 +1,17 @@
-const CACHE = 'charpet-shell-v5';
-const APP_SHELL = ['/', '/index.html', '/manifest.webmanifest'];
+const CACHE = 'charpet-shell-v6';
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(APP_SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(self.skipWaiting());
 });
 
 self.addEventListener('activate', event => {
   event.waitUntil(
-    caches.keys().then(keys => Promise.all(keys.filter(key => key !== CACHE).map(key => caches.delete(key)))).then(() => self.clients.claim())
+    caches.keys()
+      .then(keys => Promise.all(keys.map(key => caches.delete(key))))
+      .then(() => self.clients.claim())
   );
 });
 
-self.addEventListener('fetch', event => {
-  if (event.request.method !== 'GET') return;
-  const url = new URL(event.request.url);
-  const isAppCode = url.origin === self.location.origin && (url.pathname.endsWith('.js') || url.pathname.endsWith('.css') || url.pathname.endsWith('.tsx') || url.pathname === '/sw.js');
-  if (isAppCode) {
-    event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
-    return;
-  }
-  event.respondWith(
-    caches.match(event.request).then(cached => cached || fetch(event.request).then(response => {
-      const copy = response.clone();
-      if (event.request.url.startsWith(self.location.origin)) caches.open(CACHE).then(cache => cache.put(event.request, copy));
-      return response;
-    }).catch(() => caches.match('/')))
-  );
-});
+// CharPet is a Vite app with hashed production assets. Let the browser
+// fetch the current app directly instead of keeping HTML/JS/CSS in a SW cache.
+// This avoids stale PWA shells surviving a deployment.
