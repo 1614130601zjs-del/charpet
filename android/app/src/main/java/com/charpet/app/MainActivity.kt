@@ -46,6 +46,10 @@ class MainActivity : AppCompatActivity() {
             text = "启动桌宠"
             setOnClickListener { startPet() }
         }
+        val stop = Button(this).apply {
+            text = "停止桌宠"
+            setOnClickListener { stopPet() }
+        }
         val import = Button(this).apply {
             text = "导入 Web Studio 角色"
             setOnClickListener { importPet.launch(arrayOf("application/json", "text/plain", "*/*")) }
@@ -53,13 +57,13 @@ class MainActivity : AppCompatActivity() {
         val demo = Button(this).apply {
             text = "给桌宠发一句话"
             setOnClickListener {
-                startPet()
                 sendEvent("{\"type\":\"charpet.event\",\"action\":\"talk\",\"emotion\":\"happy\",\"intensity\":0.8,\"text\":\"Android 收到啦！\"}")
             }
         }
         root.addView(title)
         root.addView(status)
         root.addView(button)
+        root.addView(stop)
         root.addView(import)
         root.addView(demo)
         setContentView(root)
@@ -86,6 +90,13 @@ class MainActivity : AppCompatActivity() {
             return
         }
         startForegroundService(Intent(this, OverlayService::class.java))
+        refreshStatus()
+    }
+
+    private fun stopPet() {
+        stopService(Intent(this, OverlayService::class.java).apply {
+            action = OverlayService.ACTION_STOP
+        })
         refreshStatus()
     }
 
