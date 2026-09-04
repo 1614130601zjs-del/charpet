@@ -134,9 +134,9 @@ class OverlayService : Service() {
     }
 
     private fun html(): String {
-        val store = CharPetStore(this)
-        val name = org.json.JSONObject.quote(store.name())
-        val image = store.image()?.let { org.json.JSONObject.quote(it) } ?: "null"
+        val pet = CharPetStore(this).load()
+        val name = org.json.JSONObject.quote(pet?.optString("name", "我的 Char") ?: "我的 Char")
+        val image = pet?.let { CharPetRenderer.imageFor(it) }?.let { org.json.JSONObject.quote(it) } ?: "null"
         return """
         <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
         <style>
@@ -149,15 +149,11 @@ class OverlayService : Service() {
         </style></head><body><div id="bubble"></div><img id="pet" alt="CharPet">
         <script>
           const pet=document.getElementById('pet'),bubble=document.getElementById('bubble');
-          const image=$image;
-          if(image) pet.src=image; else pet.alt=$name;
-          function render(e){
-            e=e||{}; pet.className=e.emotion||''; bubble.textContent=e.text||''; bubble.classList.toggle('show',!!e.text);
-            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){pet.classList.remove('happy');void pet.offsetWidth;pet.classList.add('happy');}
-            if(e.emotion==='sleep'||e.action==='sleep')pet.classList.add('sleep');else pet.classList.remove('sleep');
-          }
+          const image=$image; if(image) pet.src=image; else pet.alt=$name;
+          function render(e){e=e||{};pet.className=e.emotion||'';bubble.textContent=e.text||'';bubble.classList.toggle('show',!!e.text);if(e.action==='talk'||e.action==='tap'||e.action==='wake'){pet.classList.remove('happy');void pet.offsetWidth;pet.classList.add('happy');}if(e.emotion==='sleep'||e.action==='sleep')pet.classList.add('sleep');else pet.classList.remove('sleep');}
           window.__charpetReceive=render;
-          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data); if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
+          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
+          pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));
           render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
         """.replace("$image", image).replace("$name", name)
