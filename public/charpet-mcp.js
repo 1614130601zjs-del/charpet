@@ -1,0 +1,17 @@
+(()=>{
+  const KEY='charpet.pets.v2';
+  const SELF_EDIT=['avatar','currentAppearance','nickname','tags','signature'];
+  const READ_SCOPES=['state','history','album','timeline','diary','profile','gallery'];
+  const ROOT_READ=['name','userTitle','description','relationship','relationshipText','timeline','timelineText','worldbook'];
+  const load=()=>{try{const x=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(x)?x:[]}catch{return[]}};
+  const save=x=>localStorage.setItem(KEY,JSON.stringify(x));
+  const own=(id)=>load().find(p=>p&&p.id===id)||null;
+  const fail=(code,message)=>({ok:false,error:{code,message}});
+  const ok=(data)=>({ok:true,data});
+  function snapshot(p){return {charId:p.id,name:p.name,currentAppearance:{avatar:p.assets?.avatar||p.image||'',pose:p.state?.pose||'stand',expression:p.state?.expression||'neutral',outfit:p.state?.outfit||null},nickname:p.card?.nickname||'',tags:p.card?.tags||[],signature:p.card?.signature||''};}
+  function read(p,scope){if(!READ_SCOPES.includes(scope))return fail('SCOPE_DENIED','该 MCP 读取范围不允许访问');switch(scope){case'state':return ok({current:snapshot(p),needs:p.needs||{},location:p.state?.location||'小窝',activity:p.state?.activity||''});case'history':return ok({events:(p.homeActivities||[]).slice()});case'album':return ok({items:(p.album||p.homeActivities||[]).filter(x=>x?.album||x?.special||x?.photo)});case'timeline':return ok({items:(p.timeline||[]).slice()});case'diary':return ok({items:(p.diary||[]).slice()});case'profile':return ok({name:p.name,nickname:p.card?.nickname||'',tags:p.card?.tags||[],signature:p.card?.signature||'',userTitle:p.userTitle||'',description:p.profile?.description||'',relationship:p.relationshipText||'',timeline:p.timelineText||'',worldbook:p.worldbook||[]});case'gallery':return ok({avatars:p.assets?.avatars||[],currentAvatar:p.assets?.avatar||'',poses:p.assets?.poses||{},expressions:p.assets?.expressions||{},actions:p.assets?.actions||[],outfits:p.assets?.outfits||[]});}}
+  function edit(p,field,value){if(!SELF_EDIT.includes(field))return fail('ROOT_EDIT_DENIED','CHAR 只能修改头像、当前形象、昵称、Tag、个性签名；世界书及核心角色定义不可修改');p.card=p.card||{};p.assets=p.assets||{};if(field==='avatar'){p.assets.avatar=String(value||'');p.assets.avatars=Array.isArray(p.assets.avatars)?p.assets.avatars:[];if(value&&!p.assets.avatars.includes(value))p.assets.avatars.unshift(value);}else if(field==='currentAppearance'){p.state=p.state||{};p.state={...p.state,...(value||{})};if(value?.avatar)p.assets.avatar=value.avatar;}else if(field==='nickname')p.card.nickname=String(value??'');else if(field==='tags')p.card.tags=Array.isArray(value)?value.map(String):String(value??'').split(',').map(x=>x.trim()).filter(Boolean);else if(field==='signature')p.card.signature=String(value??'');return ok({field,value:field==='tags'?p.card.tags:value,snapshot:snapshot(p)});}
+  async function request({charId,action,scope,field,value}={}){if(!charId)return fail('CHAR_REQUIRED','MCP Session 必须绑定 CHAR 身份');const p=own(charId);if(!p)return fail('CHAR_SCOPE_DENIED','CHAR 身份无效或不存在');if(action==='read')return read(p,scope);if(action==='edit')return edit(p,field,value);return fail('ACTION_DENIED','不支持的 MCP 操作');}
+  window.CharPetMCP=Object.freeze({request,permissions:{read:READ_SCOPES.slice(),selfEdit:SELF_EDIT.slice(),rootRead:ROOT_READ.slice(),rootWrite:[]}});
+  window.dispatchEvent(new CustomEvent('charpet:mcp-ready'));
+})();
