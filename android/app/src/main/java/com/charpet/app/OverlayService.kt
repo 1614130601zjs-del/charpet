@@ -42,6 +42,7 @@ class OverlayService : Service() {
     private var webView: WebView? = null
     private var params: WindowManager.LayoutParams? = null
     private var webPort: WebMessagePort? = null
+    private val prefs by lazy { getSharedPreferences(PREFS, MODE_PRIVATE) }
 
     override fun onCreate() {
         super.onCreate()
@@ -88,9 +89,7 @@ class OverlayService : Service() {
             }
         }
         root.addView(view, FrameLayout.LayoutParams(-1, -1))
-        val saved = getSharedPreferences(PREFS, MODE_PRIVATE)
-        val defaultX = (24 * density).toInt()
-        val defaultY = (160 * density).toInt()
+        installDrag(root)
         val lp = WindowManager.LayoutParams(
             size, size,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -98,14 +97,13 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            x = saved.getInt(KEY_X, defaultX)
-            y = saved.getInt(KEY_Y, defaultY)
+            x = prefs.getInt(KEY_X, (24 * density).toInt())
+            y = prefs.getInt(KEY_Y, (160 * density).toInt())
         }
         windowManager.addView(root, lp)
         overlay = root
         webView = view
         params = lp
-        installDrag(root)
         if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
     }
@@ -128,12 +126,10 @@ class OverlayService : Service() {
                 ) {
                     if (!isMainFrame || sourceOrigin.toString() != ORIGIN) return
                     val payload = message.data ?: return
-                    if (payload == "{\"type\":\"charpet.ready\"}") {
-                        replyProxy.postMessage("{\"type\":\"charpet.ack\"}")
-                        return
-                    }
-                    if (isValidPetEvent(payload)) {
-                        replyProxy.postMessage("{\"type\":\"charpet.accepted\"}")
+                    if (payload == "charpet.ready") {
+                        replyProxy.postMessage("charpet.ready")
+                    } else if (isValidPetEvent(payload)) {
+                        replyProxy.postMessage("ok")
                     }
                 }
             }
@@ -144,9 +140,11 @@ class OverlayService : Service() {
         return runCatching {
             val event = JSONObject(json)
             if (event.optString("type") != "charpet.event") return false
+            val action = event.optString("action")
             val allowedActions = setOf("idle", "talk", "tap", "drag", "sleep", "wake")
-            if (event.optString("action") !in allowedActions) return false
-            event.optDouble("intensity", 1.0) in 0.0..1.0
+            if (action !in allowedActions) return false
+            val intensity = event.optDouble("intensity", 1.0)
+            intensity in 0.0..1.0
         }.getOrDefault(false)
     }
 
@@ -164,19 +162,12 @@ class OverlayService : Service() {
                     dragging
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    if (dragging) savePosition(lp)
+                    if (dragging) prefs.edit().putInt(KEY_X, lp.x).putInt(KEY_Y, lp.y).apply()
                     dragging
                 }
                 else -> false
             }
         }
-    }
-
-    private fun savePosition(lp: WindowManager.LayoutParams) {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-            .putInt(KEY_X, lp.x)
-            .putInt(KEY_Y, lp.y)
-            .apply()
     }
 
     private fun sendEventToWeb(json: String) {
@@ -195,7 +186,7 @@ class OverlayService : Service() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
                 val payload = message.data ?: return
                 if (isValidPetEvent(payload)) {
-                    // Legacy channel is receive-only; native producers remain the event authority.
+                    // Legacy channel is receive-only for now; native remains the event source.
                 }
             }
         })
@@ -219,9 +210,7 @@ class OverlayService : Service() {
           #pet svg,#petImage{width:100%;height:100%;object-fit:contain}
           #bubble{position:absolute;top:4px;max-width:190px;background:#fffdf9;border:1px solid #ddd7ce;border-radius:999px;padding:5px 10px;font-size:12px;opacity:0;transition:.2s;z-index:2}
           #bubble.show{opacity:1}
-          #pet.action-talk .pet-talk{animation:none}
           #pet.action-talk .pet-mouth{animation:petTalk .28s ease-in-out infinite alternate}
-          #pet.action-talk .pet-eyes{animation:none}
           #pet.action-talk .pet-eyes{transform:scaleY(.88);transform-origin:center}
           #pet.emotion-happy .pet-body{animation:petHappy .7s ease-in-out 2}
           #pet.emotion-angry .pet-body{animation:petAngry .25s ease-in-out 3}
@@ -247,19 +236,24 @@ class OverlayService : Service() {
             const body=svg?.querySelector('.pet-body');
             const eyes=svg?.querySelector('.pet-eyes');
             const mouth=svg?.querySelector('.pet-mouth');
-            if(body) body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:'');
+            if(body){ body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:''); }
             if(eyes){ eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep'); eyes.classList.toggle('pet-talk',e.action==='talk'); }
-            if(mouth) mouth.classList.toggle('pet-talk',e.action==='talk');
+            if(mouth){ mouth.classList.toggle('pet-talk',e.action==='talk'); }
             bubble.textContent=e.text||'';
             bubble.classList.toggle('show',!!e.text);
-            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){ pet.classList.add('legacy'); setTimeout(()=>pet.classList.remove('legacy'),700); }
+            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
+              pet.classList.add('legacy');
+              setTimeout(()=>pet.classList.remove('legacy'),700);
+            }
           }
           window.__charpetReceive=render;
           if(window.charPetBridge){
-            window.charPetBridge.onmessage=(event)=>{try{render(JSON.parse(event.data));}catch(_) {}};
-            window.charPetBridge.postMessage(JSON.stringify({type:'charpet.ready'}));
+            window.charPetBridge.onmessage=(event)=>{
+              try{ const message=event.data; if(message==='charpet.ready') return; render(JSON.parse(message)); }catch(_){}
+            };
+            window.charPetBridge.postMessage('charpet.ready');
           }
-          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){} };port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
+          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){} };port.start();port.postMessage('charpet.ready');}});
           pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));
           render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
@@ -275,9 +269,9 @@ class OverlayService : Service() {
 
     override fun onDestroy() {
         webPort?.close()
-        overlay?.let { if (::windowManager.isInitialized) windowManager.removeView(it) }
+        overlay?.let { windowManager.removeView(it) }
         webView?.destroy()
-        overlay = null; webView = null; webPort = null; params = null
+        overlay = null; webView = null; webPort = null
         super.onDestroy()
     }
 
