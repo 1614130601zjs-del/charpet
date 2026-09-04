@@ -9,15 +9,24 @@ function db(){return new Promise((res,rej)=>{const r=indexedDB.open(DB,1);r.onup
 async function put(file){const d=await db(),k='idb://'+uid();await new Promise((res,rej)=>{const t=d.transaction(STORE,'readwrite');t.objectStore(STORE).put(file,k);t.oncomplete=res;t.onerror=()=>rej(t.error)});d.close();return k}
 function closeModal(){$$('.modal').forEach(m=>m.remove())}
 function removeRecognizer(){$$('[data-recognize]').forEach(x=>x.remove());$$('button,input[type=button],input[type=submit]').filter(x=>/识别标题/.test(x.textContent||x.value||'')).forEach(x=>x.remove())}
+function applyPendingView(){
+ const raw=localStorage.getItem(NEXT);if(!raw)return;
+ let target;try{target=JSON.parse(raw)?.view}catch{return}
+ if(!target)return;
+ const tryClick=()=>{
+  const b=[...document.querySelectorAll('[data-nav]')].find(x=>x.getAttribute('data-nav')===target||x.textContent?.trim()===target);
+  if(b){localStorage.removeItem(NEXT);b.click();return true}
+  return false;
+ };
+ if(tryClick())return;
+ let n=0;const timer=setInterval(()=>{if(tryClick()||++n>30)clearInterval(timer)},100);
+}
 function bindCards(){
  $$('.charCard').forEach(card=>{
   if(card.dataset.fix7)return;card.dataset.fix7='1';
   const p=read().find(x=>x.id===card.dataset.char);if(!p)return;
   const states=new WeakMap();
-  const arm=el=>{
-   let s=states.get(el);if(s?.timer)clearTimeout(s.timer);
-   s={held:false,timer:setTimeout(()=>{s.held=true},650)};states.set(el,s);
-  };
+  const arm=el=>{let s=states.get(el);if(s?.timer)clearTimeout(s.timer);s={held:false,timer:setTimeout(()=>{s.held=true},650)};states.set(el,s)};
   const disarm=el=>{const s=states.get(el);if(!s)return;if(s.timer)clearTimeout(s.timer);states.set(el,s)};
   const wasHeld=el=>{const s=states.get(el);if(!s?.held)return false;states.delete(el);return true};
   const av=$('img',card),meta=$('.charMeta',card);
@@ -45,5 +54,5 @@ window.addEventListener('click',e=>{
  const b=e.target.closest('button,input[type=submit]');
  if(modal&&b&&/^(导入|导入酒馆卡)$/.test((b.textContent||b.value||'').trim())){e.preventDefault();e.stopImmediatePropagation();importSubmit(modal).catch(x=>alert(x.message||'酒馆卡导入失败'));}
 },true);
-let busy=false;const obs=new MutationObserver(()=>{if(busy)return;busy=true;requestAnimationFrame(()=>{busy=false;bindCards();removeRecognizer()})});obs.observe(document.body,{subtree:true,childList:true});setTimeout(()=>{bindCards();removeRecognizer()},80);
+let busy=false;const obs=new MutationObserver(()=>{if(busy)return;busy=true;requestAnimationFrame(()=>{busy=false;bindCards();removeRecognizer()})});obs.observe(document.body,{subtree:true,childList:true});setTimeout(()=>{bindCards();removeRecognizer();applyPendingView()},80);window.addEventListener('load',applyPendingView);
 })();
