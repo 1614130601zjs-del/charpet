@@ -128,24 +128,12 @@ class OverlayService : Service() {
                     val payload = message.data ?: return
                     if (payload == "charpet.ready") {
                         replyProxy.postMessage("charpet.ready")
-                    } else if (isValidPetEvent(payload)) {
+                    } else if (CharPetEvent.parse(payload) != null) {
                         replyProxy.postMessage("ok")
                     }
                 }
             }
         )
-    }
-
-    private fun isValidPetEvent(json: String): Boolean {
-        return runCatching {
-            val event = JSONObject(json)
-            if (event.optString("type") != "charpet.event") return false
-            val action = event.optString("action")
-            val allowedActions = setOf("idle", "talk", "tap", "drag", "sleep", "wake")
-            if (action !in allowedActions) return false
-            val intensity = event.optDouble("intensity", 1.0)
-            intensity in 0.0..1.0
-        }.getOrDefault(false)
     }
 
     private fun installDrag(root: View) {
@@ -171,9 +159,11 @@ class OverlayService : Service() {
     }
 
     private fun sendEventToWeb(json: String) {
+        val event = CharPetEvent.parse(json) ?: return
+        val canonical = event.toJson()
         webView?.post {
-            webPort?.postMessage(WebMessage(json)) ?: run {
-                val safe = JSONObject.quote(json)
+            webPort?.postMessage(WebMessage(canonical)) ?: run {
+                val safe = JSONObject.quote(canonical)
                 webView?.evaluateJavascript("window.__charpetReceive && window.__charpetReceive(JSON.parse($safe))", null)
             }
         }
@@ -184,8 +174,7 @@ class OverlayService : Service() {
         webPort = channel[0]
         webPort?.setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
-                val payload = message.data ?: return
-                if (isValidPetEvent(payload)) {
+                if (CharPetEvent.parse(message.data ?: "") != null) {
                     // Legacy channel is receive-only for now; native remains the event source.
                 }
             }
