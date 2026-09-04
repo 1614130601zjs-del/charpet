@@ -57,7 +57,6 @@ function render(){
 function openEdit(entry,book){
  editing={entry,book};
  document.querySelector('#dialogTitle').textContent=entry?'编辑世界书条目':'增加世界书条目';
- document.querySelector('#editTimeline').textContent='';
  document.querySelector('#dialogTimeline').textContent=entry?'自动分析时间段：'+(entry.timeline||analyzeTimeline(entry.text)):'保存后将自动分析对应时间段';
  document.querySelector('#editText').value=entry?.text||'';
  document.querySelector('#editDialog').showModal();
