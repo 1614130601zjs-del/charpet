@@ -18,6 +18,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.core.app.NotificationCompat
+import androidx.webkit.WebMessageCompat
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONObject
 
 class OverlayService : Service() {
     companion object {
@@ -26,6 +30,7 @@ class OverlayService : Service() {
         private const val CHANNEL_ID = "charpet_overlay"
         private const val NOTIFICATION_ID = 1001
         private const val ORIGIN = "https://charpet.local"
+        private const val BRIDGE_NAME = "charPetBridge"
     }
 
     private lateinit var windowManager: WindowManager
@@ -70,7 +75,7 @@ class OverlayService : Service() {
             settings.allowContentAccess = false
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
-                    if (view != null && webPort == null) setupMessageChannel(view)
+                    if (view != null && webPort == null && !supportsModernBridge()) setupMessageChannel(view)
                 }
             }
         }
@@ -90,7 +95,47 @@ class OverlayService : Service() {
         overlay = root
         webView = view
         params = lp
+        if (supportsModernBridge()) installModernBridge(view)
         view.loadDataWithBaseURL(ORIGIN + "/", html(), "text/html", "UTF-8", null)
+    }
+
+    private fun supportsModernBridge(): Boolean =
+        WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)
+
+    private fun installModernBridge(view: WebView) {
+        WebViewCompat.addWebMessageListener(
+            view,
+            BRIDGE_NAME,
+            setOf(ORIGIN),
+            object : WebViewCompat.WebMessageListener {
+                override fun onPostMessage(
+                    view: WebView,
+                    message: WebMessageCompat,
+                    sourceOrigin: android.net.Uri,
+                    isMainFrame: Boolean,
+                    replyProxy: androidx.webkit.JavaScriptReplyProxy
+                ) {
+                    if (!isMainFrame || sourceOrigin.toString() != ORIGIN) return
+                    val payload = message.data ?: return
+                    if (isValidPetEvent(payload)) {
+                        // Native is the event source here; do not echo web-originated events back.
+                        replyProxy.postMessage(JSONObject.quote("ok"))
+                    }
+                }
+            }
+        )
+    }
+
+    private fun isValidPetEvent(json: String): Boolean {
+        return runCatching {
+            val event = JSONObject(json)
+            if (event.optString("type") != "charpet.event") return false
+            val action = event.optString("action")
+            val allowedActions = setOf("idle", "talk", "tap", "drag", "sleep", "wake")
+            if (action !in allowedActions) return false
+            val intensity = event.optDouble("intensity", 1.0)
+            intensity in 0.0..1.0
+        }.getOrDefault(false)
     }
 
     private fun installDrag(root: View) {
@@ -115,7 +160,7 @@ class OverlayService : Service() {
     private fun sendEventToWeb(json: String) {
         webView?.post {
             webPort?.postMessage(WebMessage(json)) ?: run {
-                val safe = org.json.JSONObject.quote(json)
+                val safe = JSONObject.quote(json)
                 webView?.evaluateJavascript("window.__charpetReceive && window.__charpetReceive(JSON.parse($safe))", null)
             }
         }
@@ -127,7 +172,9 @@ class OverlayService : Service() {
         webPort?.setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
             override fun onMessage(port: WebMessagePort, message: WebMessage) {
                 val payload = message.data ?: return
-                if (payload.contains("\"type\":\"charpet.event\"")) sendEventToWeb(payload)
+                if (isValidPetEvent(payload)) {
+                    // Legacy channel is receive-only for now; avoid creating an event echo loop.
+                }
             }
         })
         view.postWebMessage(WebMessage(null, arrayOf(channel[1])), android.net.Uri.parse(ORIGIN))
@@ -135,11 +182,11 @@ class OverlayService : Service() {
 
     private fun html(): String {
         val pet = CharPetStore(this).load()
-        val name = org.json.JSONObject.quote(pet?.optString("name", "我的 Char") ?: "我的 Char")
+        val name = JSONObject.quote(pet?.optString("name", "我的 Char") ?: "我的 Char")
         val inlineSvg = pet?.let { CharPetRenderer.inlineSvgFor(it) }
         val customImage = pet?.let { CharPetRenderer.imageFor(it) }
         val visual = if (inlineSvg != null) inlineSvg else {
-            val src = org.json.JSONObject.quote(customImage ?: "")
+            val src = JSONObject.quote(customImage ?: "")
             "<img id='petImage' alt='CharPet' src=$src>"
         }
         return """
@@ -179,23 +226,19 @@ class OverlayService : Service() {
             const body=svg?.querySelector('.pet-body');
             const eyes=svg?.querySelector('.pet-eyes');
             const mouth=svg?.querySelector('.pet-mouth');
-            if(body){
-              body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:'');
-            }
-            if(eyes){
-              eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep');
-              eyes.classList.toggle('pet-talk',e.action==='talk');
-            }
+            if(body){ body.className.baseVal='pet-body'+(e.action?' pet-'+e.action:'')+(e.emotion?' pet-'+e.emotion:''); }
+            if(eyes){ eyes.classList.toggle('pet-sleep',e.emotion==='sleep'||e.action==='sleep'); eyes.classList.toggle('pet-talk',e.action==='talk'); }
             if(mouth){ mouth.classList.toggle('pet-talk',e.action==='talk'); }
             bubble.textContent=e.text||'';
             bubble.classList.toggle('show',!!e.text);
-            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){
-              pet.classList.add('legacy');
-              setTimeout(()=>pet.classList.remove('legacy'),700);
-            }
+            if(e.action==='talk'||e.action==='tap'||e.action==='wake'){ pet.classList.add('legacy'); setTimeout(()=>pet.classList.remove('legacy'),700); }
           }
           window.__charpetReceive=render;
-          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){}};port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
+          if(window.charPetBridge){
+            window.charPetBridge.onmessage=(event)=>{try{render(JSON.parse(event.data));}catch(_) {}};
+            window.charPetBridge.postMessage(JSON.stringify({type:'charpet.ready'}));
+          }
+          window.addEventListener('message',e=>{if(e.data?.type==='charpet.event')render(e.data);if(e.ports?.[0]){const port=e.ports[0];port.onmessage=m=>{try{render(JSON.parse(m.data));}catch(_){} };port.start();port.postMessage(JSON.stringify({type:'charpet.ready'}));}});
           pet.addEventListener('click',()=>render({type:'charpet.event',action:'tap',emotion:'happy',intensity:.9,text:'被你摸到啦'}));
           render({action:'idle',emotion:'idle',intensity:.35});
         </script></body></html>
