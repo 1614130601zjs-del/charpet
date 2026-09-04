@@ -25,13 +25,41 @@ export type CharAssets = {
   [key: string]: unknown;
 };
 
+export type CharCardPreferences = {
+  nickname?: string;
+  title?: string;
+  tags?: string[];
+  signature?: string;
+  templateId?: string;
+  accentColor?: string;
+};
+
+export type HomeActivityMedia = {
+  kind: 'image' | 'video' | 'animation';
+  src: string;
+  poster?: string;
+  alt?: string;
+};
+
+export type HomeActivity = {
+  id: string;
+  createdAt: number;
+  title: string;
+  detail?: string;
+  action?: string;
+  itemId?: string;
+  itemName?: string;
+  media?: HomeActivityMedia[];
+};
+
 export type DiaryEntry = { id: string; createdAt: number; title?: string; text: string; mood?: PetMood; source?: 'ai' | 'user' | 'story' };
 export type TimelineEntry = { id: string; createdAt: number; type: 'interaction' | 'story' | 'state' | 'diary' | 'system' | 'outing'; title: string; detail?: string; effects?: Record<string, number> };
 
 export type PetRecord = {
   id: string; name: string; image: string; source: 'upload' | 'creator'; createdAt: number; creatorState?: unknown;
   assets?: CharAssets; userTitle?: string; era?: string;
+  card?: CharCardPreferences;
   profile?: { description?: string; tone?: string; personality?: string[]; worldbookSummary?: string; syncedAt?: number };
   worldbook?: WorldbookEntry[];
-  relationship?: RelationshipStat[]; needs?: PetNeeds; timeline?: TimelineEntry[]; diary?: DiaryEntry[]; memories?: TimelineEntry[]; stats?: PetStats;
+  relationship?: RelationshipStat[]; needs?: PetNeeds; timeline?: TimelineEntry[]; diary?: DiaryEntry[]; memories?: TimelineEntry[]; homeActivities?: HomeActivity[]; stats?: PetStats;
 };
