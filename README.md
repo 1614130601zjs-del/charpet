@@ -1,3 +1,7 @@
+<a href="https://render.com/deploy?repo=https://github.com/1614130601zjs-del/charpet">
+  <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" />
+</a>
+
 # CharPet
 
 > 把你的 Char 变成一个真正会待机、会回应、最终可以跑在手机桌面上的小伙伴。
@@ -13,11 +17,7 @@
 
 ## 🚀 一键部署到 Render
 
-<a href="https://render.com/deploy?repo=https://github.com/1614130601zjs-del/charpet">
-  <img src="https://render.com/images/deploy-to-render-button.svg" alt="Deploy to Render" />
-</a>
-
-点上面的紫色 **Deploy to Render**，Render 会读取仓库里的 `render.yaml`，直接创建 Web Studio。
+上面的紫色 **Deploy to Render** 按钮可以直接进入 Render 的 Blueprint 部署流程，并读取仓库里的 `render.yaml` 创建 Web Studio。
 
 ## 目标架构
 
