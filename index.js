@@ -1,5 +1,5 @@
-import { eventSource, event_types } from '../../../script.js';
-import { getContext } from '../../../extensions.js';
+import { eventSource, event_types } from '../../../scripts/script.js';
+import { getContext } from '../../../scripts/extensions.js';
 
 const EXT_ID = 'charpet-st-extension';
 const REFRESH_EVENTS = [
