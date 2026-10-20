@@ -1,0 +1,12 @@
+{
+  "display_name": "CharPet 桌宠",
+  "loading_order": 10,
+  "requires": [],
+  "optional": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "1614130601zjs-del",
+  "version": "0.1.0",
+  "homePage": "https://github.com/1614130601zjs-del/charpet",
+  "auto_update": true
+}
